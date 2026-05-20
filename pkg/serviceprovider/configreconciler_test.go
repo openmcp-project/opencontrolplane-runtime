@@ -19,7 +19,7 @@ func TestPCReconciler_Reconcile(t *testing.T) {
 	tests := []struct {
 		name string // description of this test case
 		// Named input parameters for target function.
-		providerConfig ProviderConfig
+		providerConfig Config
 		req            ctrl.Request
 		want           ctrl.Result
 		wantObject     bool
@@ -102,7 +102,7 @@ func TestPCReconciler_Reconcile(t *testing.T) {
 	}
 }
 
-var _ ProviderConfig = &fakeProviderConfigImpl{}
+var _ Config = &fakeProviderConfigImpl{}
 
 type fakeProviderConfigImpl struct {
 	metav1.TypeMeta

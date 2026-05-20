@@ -10,7 +10,7 @@ import (
 )
 
 // Reconciler implements any business logic required to manage API objects
-type Reconciler[T API, PC ProviderConfig] interface {
+type Reconciler[T API, PC Config] interface {
 	// CreateOrUpdate is called on every add or update event
 	CreateOrUpdate(ctx context.Context, obj T, pc PC, clusters ClusterContext) (ctrl.Result, error)
 	// Delete is called on every delete event
@@ -36,9 +36,9 @@ type Status interface {
 	SetObservedGeneration(int64)
 }
 
-// ProviderConfig represents the config for platform operators
-// The ProviderConfig is passed to the DomainServiceReconcile to reconcile APIObjects
-type ProviderConfig interface {
+// Config represents the config for platform operators
+// The Config is passed to the Reconciler to reconcile API objects
+type Config interface {
 	client.Object
 	// PollIntveral can be used to periodically requeue, preventing managed objects
 	// from drifting on the target cluster.  Return 0 if not required.

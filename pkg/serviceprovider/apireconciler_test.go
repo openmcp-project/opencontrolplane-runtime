@@ -311,23 +311,23 @@ func TestSPReconciler_Reconcile(t *testing.T) {
 				assert.False(t, mockSPR.createOrUpdateCalled)
 				assert.False(t, mockSPR.deleteCalled)
 				assert.Nil(t, mockSPR.apiObj)
-				assert.Nil(t, mockSPR.pcObj)
-				assert.Empty(t, mockSPR.contextObj.MCPAccessSecretKey)
-				assert.Empty(t, mockSPR.contextObj.WorkloadAccessSecretKey)
+				assert.Nil(t, mockSPR.config)
+				assert.Empty(t, mockSPR.clusterContext.MCPAccessSecretKey)
+				assert.Empty(t, mockSPR.clusterContext.WorkloadAccessSecretKey)
 				return
 			}
 
 			// assert that the generic reconciler delegates objects to the target reconciler as expected
 			assert.Equal(t, client.ObjectKeyFromObject(tt.apiObj), client.ObjectKeyFromObject(mockSPR.apiObj))
-			assert.Equal(t, client.ObjectKeyFromObject(tt.providerConfig), client.ObjectKeyFromObject(mockSPR.pcObj))
+			assert.Equal(t, client.ObjectKeyFromObject(tt.providerConfig), client.ObjectKeyFromObject(mockSPR.config))
 			assert.Equal(t, client.ObjectKey{
 				Namespace: tt.req.Namespace,
 				Name:      testMCPKubeconfig,
-			}, mockSPR.contextObj.MCPAccessSecretKey)
+			}, mockSPR.clusterContext.MCPAccessSecretKey)
 			assert.Equal(t, client.ObjectKey{
 				Namespace: tt.req.Namespace,
 				Name:      testWorkloadKubeconfig,
-			}, mockSPR.contextObj.WorkloadAccessSecretKey)
+			}, mockSPR.clusterContext.WorkloadAccessSecretKey)
 			assertStatusUpdate(t, onboardingCluster.Client(), tt.req, tt.wantStatusPhase)
 		})
 	}
@@ -349,8 +349,8 @@ var _ Reconciler[*fakeApiImpl, *fakeProviderConfigImpl] = &MockServiceProviderRe
 
 type MockServiceProviderReconciler struct {
 	apiObj               API
-	pcObj                ProviderConfig
-	contextObj           ClusterContext
+	config               Config
+	clusterContext       ClusterContext
 	createOrUpdateCalled bool
 	deleteCalled         bool
 	wantError            bool
@@ -359,8 +359,8 @@ type MockServiceProviderReconciler struct {
 // CreateOrUpdate implements [runtime.ServiceProviderReconciler].
 func (f *MockServiceProviderReconciler) CreateOrUpdate(_ context.Context, obj *fakeApiImpl, pc *fakeProviderConfigImpl, cc ClusterContext) (ctrl.Result, error) {
 	f.apiObj = obj
-	f.pcObj = pc
-	f.contextObj = cc
+	f.config = pc
+	f.clusterContext = cc
 	f.createOrUpdateCalled = true
 	if f.wantError {
 		StatusProgressing(obj, reasonReconcileError, "test error requested")
@@ -373,8 +373,8 @@ func (f *MockServiceProviderReconciler) CreateOrUpdate(_ context.Context, obj *f
 // Delete implements [runtime.ServiceProviderReconciler].
 func (f *MockServiceProviderReconciler) Delete(_ context.Context, obj *fakeApiImpl, pc *fakeProviderConfigImpl, cc ClusterContext) (ctrl.Result, error) {
 	f.apiObj = obj
-	f.pcObj = pc
-	f.contextObj = cc
+	f.config = pc
+	f.clusterContext = cc
 	f.deleteCalled = true
 	StatusTerminating(obj)
 	if f.wantError {

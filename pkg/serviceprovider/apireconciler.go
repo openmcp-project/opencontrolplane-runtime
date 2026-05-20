@@ -27,7 +27,7 @@ import (
 
 // APIReconciler implements a generic reconcile loop to separate platform
 // and service provider developer space.
-type APIReconciler[T API, PC ProviderConfig] struct {
+type APIReconciler[T API, PC Config] struct {
 	// platformCluster represents the platform cluster of the v2 architecture
 	platformCluster *clusters.Cluster
 	// onboardingCluster represents the onboarding cluster of the v2 architecture
@@ -47,7 +47,7 @@ type APIReconciler[T API, PC ProviderConfig] struct {
 }
 
 // NewAPIReconciler creates a reconciler instance for the given types.
-func NewAPIReconciler[T API, PC ProviderConfig](emptyObj func() T) *APIReconciler[T, PC] {
+func NewAPIReconciler[T API, PC Config](emptyObj func() T) *APIReconciler[T, PC] {
 	return &APIReconciler[T, PC]{
 		emptyObj: emptyObj,
 	}
@@ -95,7 +95,7 @@ func (r *APIReconciler[T, PC]) WithProviderConfig(config PC) *APIReconciler[T, P
 	return r
 }
 
-// Reconcile orchestrates platform and DomainServiceReconciler logic to reconcile APIObjects
+// Reconcile orchestrates platform and (domain specific) Reconciler logic to reconcile API objects
 func (r *APIReconciler[T, PC]) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, reconcileErr error) {
 	l := logf.FromContext(ctx)
 	// common reconciler logic including get obj, providerconfig, mcp/workload access

@@ -17,7 +17,7 @@ import (
 // ConfigReconciler notifies the service provider about provider config updates
 // through a shared update channel. Any provider config change results in a reconcile request
 // for every existing service provider api object.
-type ConfigReconciler[T ProviderConfig] struct {
+type ConfigReconciler[T Config] struct {
 	platformCluster       *clusters.Cluster
 	providerUpdateChannel chan event.GenericEvent
 	providerName          string
@@ -25,7 +25,7 @@ type ConfigReconciler[T ProviderConfig] struct {
 }
 
 // NewProviderConfigReconciler creates a new provider PCReconciler instance.
-func NewProviderConfigReconciler[T ProviderConfig](providerName string, emptyObj func() T) *ConfigReconciler[T] {
+func NewProviderConfigReconciler[T Config](providerName string, emptyObj func() T) *ConfigReconciler[T] {
 	return &ConfigReconciler[T]{
 		providerName: providerName,
 		emptyObj:     emptyObj,
