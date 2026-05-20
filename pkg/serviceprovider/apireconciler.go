@@ -12,7 +12,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -25,25 +24,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
-
-// API represents the end-user facing onboarding API type
-type API interface {
-	client.Object
-	Status
-	Finalizer() string
-}
-
-// Status represents the common status contract of API types
-type Status interface {
-	// GetStatus returns the status object
-	GetStatus() any
-	// GetConditions returns the status object
-	GetConditions() *[]metav1.Condition
-	// SetPhase sets Status.Phase
-	SetPhase(string)
-	// SetObservedGeneration sets Status.ObservedGeneration
-	SetObservedGeneration(int64)
-}
 
 // APIReconciler implements a generic reconcile loop to separate platform
 // and service provider developer space.

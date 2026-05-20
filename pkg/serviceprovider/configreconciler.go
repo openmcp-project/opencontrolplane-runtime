@@ -2,7 +2,6 @@ package serviceprovider
 
 import (
 	"context"
-	"time"
 
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -14,15 +13,6 @@ import (
 	"github.com/openmcp-project/controller-utils/pkg/clusters"
 	"github.com/openmcp-project/controller-utils/pkg/controller"
 )
-
-// ProviderConfig represents the config for platform operators
-// The ProviderConfig is passed to the DomainServiceReconcile to reconcile APIObjects
-type ProviderConfig interface {
-	client.Object
-	// PollIntveral can be used to periodically requeue, preventing managed objects
-	// from drifting on the target cluster.  Return 0 if not required.
-	PollInterval() time.Duration
-}
 
 // ConfigReconciler notifies the service provider about provider config updates
 // through a shared update channel. Any provider config change results in a reconcile request
