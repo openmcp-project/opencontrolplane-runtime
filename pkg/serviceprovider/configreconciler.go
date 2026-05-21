@@ -24,53 +24,84 @@ type ConfigReconciler[T Config] struct {
 	emptyObj              func() T
 }
 
-// NewProviderConfigReconciler creates a new provider PCReconciler instance.
-func NewProviderConfigReconciler[T Config](providerName string, emptyObj func() T) *ConfigReconciler[T] {
-	return &ConfigReconciler[T]{
-		providerName: providerName,
-		emptyObj:     emptyObj,
+// ConfigReconcilerBuilder enables building valid ConfigReconcilers.
+type ConfigReconcilerBuilder[T Config] struct {
+	configReconciler ConfigReconciler[T]
+}
+
+// NewConfigReconcilerBuilder creates a builder.
+func NewConfigReconcilerBuilder[T Config]() *ConfigReconcilerBuilder[T] {
+	return &ConfigReconcilerBuilder[T]{
+		configReconciler: ConfigReconciler[T]{},
 	}
 }
 
-// WithPlatformCluster sets the platform cluster.
-func (r *ConfigReconciler[T]) WithPlatformCluster(c *clusters.Cluster) *ConfigReconciler[T] {
-	r.platformCluster = c
-	return r
+// MustBuild validates every required field has been set and returns the ConfigReconciler.
+func (b *ConfigReconcilerBuilder[T]) MustBuild() *ConfigReconciler[T] {
+	// validate required fields
+	if b.configReconciler.emptyObj == nil {
+		panic("empty object provider is required")
+	}
+	if b.configReconciler.platformCluster == nil {
+		panic("platform cluster is required")
+	}
+	if b.configReconciler.providerUpdateChannel == nil {
+		panic("update channel is required")
+	}
+	return &b.configReconciler
 }
 
-// WithUpdateChannel sets the channel to send config changes.
-func (r *ConfigReconciler[T]) WithUpdateChannel(c chan event.GenericEvent) *ConfigReconciler[T] {
-	r.providerUpdateChannel = c
-	return r
+// EmptyObjectProvider sets the empty object function required for concrete type processing.
+func (b *ConfigReconcilerBuilder[T]) EmptyObjectProvider(emptyObj func() T) *ConfigReconcilerBuilder[T] {
+	b.configReconciler.emptyObj = emptyObj
+	return b
 }
 
-// Reconcile acts as a sender to notify receivers about provider config changes .
-func (r *ConfigReconciler[T]) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+// PlatformCluster sets the platform cluster.
+func (b *ConfigReconcilerBuilder[T]) PlatformCluster(c *clusters.Cluster) *ConfigReconcilerBuilder[T] {
+	b.configReconciler.platformCluster = c
+	return b
+}
+
+// ProviderName sets the provider name.
+func (b *ConfigReconcilerBuilder[T]) ProviderName(name string) *ConfigReconcilerBuilder[T] {
+	b.configReconciler.providerName = name
+	return b
+}
+
+// UpdateChannel sets the channel to send config changes.
+func (b *ConfigReconcilerBuilder[T]) UpdateChannel(c chan event.GenericEvent) *ConfigReconcilerBuilder[T] {
+	b.configReconciler.providerUpdateChannel = c
+	return b
+}
+
+// Reconcile acts as a sender to notify receivers about provider config changes.
+func (b *ConfigReconciler[T]) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log.FromContext(ctx).Info("reconcile provider config")
-	obj := r.emptyObj()
+	obj := b.emptyObj()
 	notify := event.GenericEvent{}
-	if err := r.platformCluster.Client().Get(ctx, req.NamespacedName, obj); err != nil {
-		r.providerUpdateChannel <- notify
+	if err := b.platformCluster.Client().Get(ctx, req.NamespacedName, obj); err != nil {
+		b.providerUpdateChannel <- notify
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	if !obj.GetDeletionTimestamp().IsZero() {
-		r.providerUpdateChannel <- notify
+		b.providerUpdateChannel <- notify
 		return ctrl.Result{}, nil
 	}
 	notify.Object = obj.DeepCopyObject().(T)
-	r.providerUpdateChannel <- notify
+	b.providerUpdateChannel <- notify
 	return ctrl.Result{}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *ConfigReconciler[T]) SetupWithManager(mgr ctrl.Manager) error {
+func (b *ConfigReconciler[T]) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		WatchesRawSource(source.Kind(
-			r.platformCluster.Cluster().GetCache(),
-			r.emptyObj(),
+			b.platformCluster.Cluster().GetCache(),
+			b.emptyObj(),
 			&handler.TypedEnqueueRequestForObject[T]{},
-			controller.ToTypedPredicate[T](controller.ExactNamePredicate(r.providerName, "")),
+			controller.ToTypedPredicate[T](controller.ExactNamePredicate(b.providerName, "")),
 		)).
 		Named("providerconfig").
-		Complete(r)
+		Complete(b)
 }

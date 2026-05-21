@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestPCReconciler_Reconcile(t *testing.T) {
+func TestConfigReconciler_Reconcile(t *testing.T) {
 	const testObjectName = "test"
 	tests := []struct {
 		name string // description of this test case
@@ -80,11 +80,12 @@ func TestPCReconciler_Reconcile(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := NewProviderConfigReconciler("test", func() *fakeProviderConfigImpl {
-				return &fakeProviderConfigImpl{}
-			}).
-				WithPlatformCluster(createFakeCluster(t, "platform", tt.providerConfig)).
-				WithUpdateChannel(make(chan event.GenericEvent, 1))
+			r := NewConfigReconcilerBuilder[*fakeProviderConfigImpl]().
+				EmptyObjectProvider(func() *fakeProviderConfigImpl { return &fakeProviderConfigImpl{} }).
+				PlatformCluster(createFakeCluster(t, "platform", tt.providerConfig)).
+				ProviderName("test").
+				UpdateChannel(make(chan event.GenericEvent, 1)).
+				MustBuild()
 			got, gotErr := r.Reconcile(context.Background(), tt.req)
 			if gotErr != nil {
 				if !tt.wantErr {
@@ -105,13 +106,16 @@ func TestPCReconciler_Reconcile(t *testing.T) {
 var _ Config = &fakeProviderConfigImpl{}
 
 type fakeProviderConfigImpl struct {
-	metav1.TypeMeta
-	metav1.ObjectMeta
-	FakePollInterval time.Duration
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	FakePollInterval  time.Duration
 }
 
 func (f *fakeProviderConfigImpl) DeepCopyObject() runtime.Object {
-	return f
+	return &fakeProviderConfigImpl{
+		ObjectMeta:       *f.DeepCopy(),
+		FakePollInterval: f.PollInterval(),
+	}
 }
 
 func (f *fakeProviderConfigImpl) PollInterval() time.Duration {

@@ -48,7 +48,7 @@ const (
 	testWorkloadKubeconfig = "workload-kubeconfig"
 )
 
-func TestSPReconciler_Reconcile(t *testing.T) {
+func TestAPIReconciler_Reconcile(t *testing.T) {
 	tests := []struct {
 		name string // description of this test case
 		// Named input parameters for target function.
@@ -254,15 +254,14 @@ func TestSPReconciler_Reconcile(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			onboardingCluster := createFakeCluster(t, "onboarding", tt.apiObj)
 			platformCluster := createFakeCluster(t, "platform")
-			mockSPR := &MockServiceProviderReconciler{
+			mockReconciler := &MockServiceProviderReconciler{
 				wantError: tt.wantErr,
 			}
-			r := NewAPIReconciler[*fakeApiImpl, *fakeProviderConfigImpl](func() *fakeApiImpl {
-				return &fakeApiImpl{}
-			}).
-				WithOnboardingCluster(onboardingCluster).
-				WithPlatformCluster(platformCluster).
-				WithClusterAccessReconciler(FakeClusterAccessProvider{
+			builder := NewAPIReconcilerBuilder[*fakeApiImpl, *fakeProviderConfigImpl]().
+				EmptyObjectProvider(func() *fakeApiImpl { return &fakeApiImpl{} }).
+				OnboardingCluster(onboardingCluster).
+				PlatformCluster(platformCluster).
+				ClusterAccessReconciler(FakeClusterAccessProvider{
 					ManagedControlPlane: createFakeCluster(t, testMCPName),
 					ManagedControlPlaneAR: &clustersv1alpha1.AccessRequest{
 						ObjectMeta: metav1.ObjectMeta{
@@ -288,11 +287,12 @@ func TestSPReconciler_Reconcile(t *testing.T) {
 						},
 					},
 				}).
-				WithServiceProviderReconciler(mockSPR).
-				WithWorkloadCluster(true)
+				Reconciler(mockReconciler).
+				WorkloadCluster(true)
 			if tt.providerConfig != nil {
-				r.WithProviderConfig(tt.providerConfig)
+				builder.ProviderConfig(tt.providerConfig)
 			}
+			r := builder.MustBuild()
 			got, gotErr := r.Reconcile(context.Background(), tt.req)
 			if gotErr != nil {
 				if !tt.wantErr {
@@ -305,29 +305,29 @@ func TestSPReconciler_Reconcile(t *testing.T) {
 				t.Fatal("Reconcile() succeeded unexpectedly")
 			}
 			assert.Equal(t, tt.want, got)
-			assert.Equal(t, tt.wantReconciliation, mockSPR.createOrUpdateCalled || mockSPR.deleteCalled)
+			assert.Equal(t, tt.wantReconciliation, mockReconciler.createOrUpdateCalled || mockReconciler.deleteCalled)
 
 			if !tt.wantReconciliation {
-				assert.False(t, mockSPR.createOrUpdateCalled)
-				assert.False(t, mockSPR.deleteCalled)
-				assert.Nil(t, mockSPR.apiObj)
-				assert.Nil(t, mockSPR.config)
-				assert.Empty(t, mockSPR.clusterContext.MCPAccessSecretKey)
-				assert.Empty(t, mockSPR.clusterContext.WorkloadAccessSecretKey)
+				assert.False(t, mockReconciler.createOrUpdateCalled)
+				assert.False(t, mockReconciler.deleteCalled)
+				assert.Nil(t, mockReconciler.apiObj)
+				assert.Nil(t, mockReconciler.config)
+				assert.Empty(t, mockReconciler.clusterContext.MCPAccessSecretKey)
+				assert.Empty(t, mockReconciler.clusterContext.WorkloadAccessSecretKey)
 				return
 			}
 
 			// assert that the generic reconciler delegates objects to the target reconciler as expected
-			assert.Equal(t, client.ObjectKeyFromObject(tt.apiObj), client.ObjectKeyFromObject(mockSPR.apiObj))
-			assert.Equal(t, client.ObjectKeyFromObject(tt.providerConfig), client.ObjectKeyFromObject(mockSPR.config))
+			assert.Equal(t, client.ObjectKeyFromObject(tt.apiObj), client.ObjectKeyFromObject(mockReconciler.apiObj))
+			assert.Equal(t, client.ObjectKeyFromObject(tt.providerConfig), client.ObjectKeyFromObject(mockReconciler.config))
 			assert.Equal(t, client.ObjectKey{
 				Namespace: tt.req.Namespace,
 				Name:      testMCPKubeconfig,
-			}, mockSPR.clusterContext.MCPAccessSecretKey)
+			}, mockReconciler.clusterContext.MCPAccessSecretKey)
 			assert.Equal(t, client.ObjectKey{
 				Namespace: tt.req.Namespace,
 				Name:      testWorkloadKubeconfig,
-			}, mockSPR.clusterContext.WorkloadAccessSecretKey)
+			}, mockReconciler.clusterContext.WorkloadAccessSecretKey)
 			assertStatusUpdate(t, onboardingCluster.Client(), tt.req, tt.wantStatusPhase)
 		})
 	}
@@ -356,7 +356,7 @@ type MockServiceProviderReconciler struct {
 	wantError            bool
 }
 
-// CreateOrUpdate implements [runtime.ServiceProviderReconciler].
+// CreateOrUpdate implements [Reconciler].
 func (f *MockServiceProviderReconciler) CreateOrUpdate(_ context.Context, obj *fakeApiImpl, pc *fakeProviderConfigImpl, cc ClusterContext) (ctrl.Result, error) {
 	f.apiObj = obj
 	f.config = pc
@@ -370,7 +370,7 @@ func (f *MockServiceProviderReconciler) CreateOrUpdate(_ context.Context, obj *f
 	return reconcile.Result{}, nil
 }
 
-// Delete implements [runtime.ServiceProviderReconciler].
+// Delete implements [Reconciler].
 func (f *MockServiceProviderReconciler) Delete(_ context.Context, obj *fakeApiImpl, pc *fakeProviderConfigImpl, cc ClusterContext) (ctrl.Result, error) {
 	f.apiObj = obj
 	f.config = pc
@@ -590,16 +590,12 @@ func TestMapSecretToRequests(t *testing.T) {
 				referencedSecrets: tt.referenced,
 			}
 
-			r := NewAPIReconciler[*fakeApiImpl, *fakeProviderConfigImpl](func() *fakeApiImpl {
-				obj := &fakeApiImpl{}
-				return obj
-			}).
-				WithOnboardingCluster(onboardingCluster).
-				WithServiceProviderReconciler(mockSW)
-
-			if tt.providerConfig != nil {
-				r.WithProviderConfig(tt.providerConfig)
+			r := &APIReconciler[*fakeApiImpl, *fakeProviderConfigImpl]{
+				emptyObj:          func() *fakeApiImpl { return &fakeApiImpl{} },
+				onboardingCluster: onboardingCluster,
+				reconciler:        mockSW,
 			}
+			r.providerConfig.Store(&tt.providerConfig)
 
 			mapFn := r.mapSecretToRequests(mockSW)
 			reqs := mapFn(context.Background(), tt.secret)
@@ -618,7 +614,7 @@ func TestMapSecretToRequests(t *testing.T) {
 	}
 }
 
-func TestSPReconciler_enqueueAllObjects(t *testing.T) {
+func TestAPIReconciler_enqueueAllObjects(t *testing.T) {
 	tests := []struct {
 		name              string // description of this test case
 		onboardingCluster *clusters.Cluster
@@ -647,10 +643,10 @@ func TestSPReconciler_enqueueAllObjects(t *testing.T) {
 		core, observedLogs := observer.New(zap.ErrorLevel)
 		testContext := log.IntoContext(context.Background(), zapr.NewLogger(zap.New(core)))
 		t.Run(tt.name, func(t *testing.T) {
-			r := NewAPIReconciler[*fakeApiImpl, *fakeProviderConfigImpl](func() *fakeApiImpl {
-				return &fakeApiImpl{}
-			})
-			r.onboardingCluster = tt.onboardingCluster
+			r := &APIReconciler[*fakeApiImpl, *fakeProviderConfigImpl]{
+				emptyObj:          func() *fakeApiImpl { return &fakeApiImpl{} },
+				onboardingCluster: tt.onboardingCluster,
+			}
 			got := r.enqueueAllObjects(testContext)
 			if len(got) == 0 {
 				logs := observedLogs.All()

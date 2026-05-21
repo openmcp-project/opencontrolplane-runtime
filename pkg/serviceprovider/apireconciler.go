@@ -27,7 +27,7 @@ import (
 
 // APIReconciler implements a generic reconcile loop to separate platform
 // and service provider developer space.
-type APIReconciler[T API, PC Config] struct {
+type APIReconciler[T API, C Config] struct {
 	// platformCluster represents the platform cluster of the v2 architecture
 	platformCluster *clusters.Cluster
 	// onboardingCluster represents the onboarding cluster of the v2 architecture
@@ -35,9 +35,9 @@ type APIReconciler[T API, PC Config] struct {
 	// clusterAccessReconciler reconciles access to MCP and workload clusters
 	clusterAccessReconciler ClusterAccessProvider
 	// reconciler reconciles the end-user facing onboarding API of a service provider
-	reconciler Reconciler[T, PC]
+	reconciler Reconciler[T, C]
 	// providerConfig represents the platform operator facing platform API of a service provider
-	providerConfig atomic.Pointer[PC]
+	providerConfig atomic.Pointer[C]
 	// withWorkloadCluster defines whether a service provider requires access to a workload cluster
 	withWorkloadCluster bool
 	// secretNamespace is the namespace to watch secrets in on the platform cluster. Used only if the ServiceProviderReconciler also implements SecretWatcher.
@@ -46,57 +46,90 @@ type APIReconciler[T API, PC Config] struct {
 	emptyObj func() T
 }
 
-// NewAPIReconciler creates a reconciler instance for the given types.
-func NewAPIReconciler[T API, PC Config](emptyObj func() T) *APIReconciler[T, PC] {
-	return &APIReconciler[T, PC]{
-		emptyObj: emptyObj,
+// APIReconcilerBuilder enables building valid APIReconcilers.
+type APIReconcilerBuilder[T API, C Config] struct {
+	apiReconciler APIReconciler[T, C]
+}
+
+// NewAPIReconcilerBuilder creates a builder.
+func NewAPIReconcilerBuilder[T API, C Config]() *APIReconcilerBuilder[T, C] {
+	return &APIReconcilerBuilder[T, C]{
+		apiReconciler: APIReconciler[T, C]{},
 	}
 }
 
-// WithPlatformCluster set the platform cluster.
-func (r *APIReconciler[T, PC]) WithPlatformCluster(c *clusters.Cluster) *APIReconciler[T, PC] {
-	r.platformCluster = c
-	return r
+// MustBuild validates every required field has been set and returns the APIReconciler.
+func (b *APIReconcilerBuilder[T, C]) MustBuild() *APIReconciler[T, C] {
+	// validate required fields
+	if b.apiReconciler.clusterAccessReconciler == nil {
+		panic("cluster access reconciler is required")
+	}
+	if b.apiReconciler.emptyObj == nil {
+		panic("empty object provider is required")
+	}
+	if b.apiReconciler.onboardingCluster == nil {
+		panic("onboarding cluster is required")
+	}
+	if b.apiReconciler.platformCluster == nil {
+		panic("platform cluster is required")
+	}
+	if b.apiReconciler.reconciler == nil {
+		panic("reconciler is required")
+	}
+	return &b.apiReconciler
 }
 
-// WithOnboardingCluster set the onboarding cluster.
-func (r *APIReconciler[T, PC]) WithOnboardingCluster(c *clusters.Cluster) *APIReconciler[T, PC] {
-	r.onboardingCluster = c
-	return r
+// EmptyObjectProvider sets the empty object function required for concrete type processing.
+func (b *APIReconcilerBuilder[T, C]) EmptyObjectProvider(emptyObj func() T) *APIReconcilerBuilder[T, C] {
+	b.apiReconciler.emptyObj = emptyObj
+	return b
 }
 
-// WithClusterAccessReconciler sets the cluster access reconciler.
-func (r *APIReconciler[T, PC]) WithClusterAccessReconciler(car ClusterAccessProvider) *APIReconciler[T, PC] {
-	r.clusterAccessReconciler = car
-	return r
+// PlatformCluster sets the platform cluster.
+func (b *APIReconcilerBuilder[T, C]) PlatformCluster(c *clusters.Cluster) *APIReconcilerBuilder[T, C] {
+	b.apiReconciler.platformCluster = c
+	return b
 }
 
-// WithServiceProviderReconciler sets the service provider reconciler.
-func (r *APIReconciler[T, PC]) WithServiceProviderReconciler(dsr Reconciler[T, PC]) *APIReconciler[T, PC] {
-	r.reconciler = dsr
-	return r
+// OnboardingCluster set the onboarding cluster.
+func (b *APIReconcilerBuilder[T, C]) OnboardingCluster(c *clusters.Cluster) *APIReconcilerBuilder[T, C] {
+	b.apiReconciler.onboardingCluster = c
+	return b
 }
 
-// WithWorkloadCluster sets if the service provider reconciler requests a workload cluster
-func (r *APIReconciler[T, PC]) WithWorkloadCluster(b bool) *APIReconciler[T, PC] {
-	r.withWorkloadCluster = b
-	return r
+// ClusterAccessReconciler sets the cluster access reconciler.
+func (b *APIReconcilerBuilder[T, C]) ClusterAccessReconciler(car ClusterAccessProvider) *APIReconcilerBuilder[T, C] {
+	b.apiReconciler.clusterAccessReconciler = car
+	return b
 }
 
-// WithSecretNamespace enables secret watching in the given namespace on the platform cluster. Only used if the ServiceProviderReconciler also implements SecretWatcher.
-func (r *APIReconciler[T, PC]) WithSecretNamespace(ns string) *APIReconciler[T, PC] {
-	r.secretNamespace = ns
-	return r
+// Reconciler sets the reconciler for a concrete API type.
+func (b *APIReconcilerBuilder[T, C]) Reconciler(dsr Reconciler[T, C]) *APIReconcilerBuilder[T, C] {
+	b.apiReconciler.reconciler = dsr
+	return b
 }
 
-// WithProviderConfig sets if the service provider config.
-func (r *APIReconciler[T, PC]) WithProviderConfig(config PC) *APIReconciler[T, PC] {
-	r.providerConfig.Store(&config)
-	return r
+// WorkloadCluster results in the service provider requesting a workload cluster
+func (b *APIReconcilerBuilder[T, C]) WorkloadCluster(wlCluster bool) *APIReconcilerBuilder[T, C] {
+	b.apiReconciler.withWorkloadCluster = wlCluster
+	return b
+}
+
+// SecretNamespace enables secret watching in the given namespace on the platform cluster.
+// Only used if the ServiceProviderReconciler also implements SecretWatcher.
+func (b *APIReconcilerBuilder[T, C]) SecretNamespace(ns string) *APIReconcilerBuilder[T, C] {
+	b.apiReconciler.secretNamespace = ns
+	return b
+}
+
+// ProviderConfig sets the provider config.
+func (b *APIReconcilerBuilder[T, C]) ProviderConfig(config C) *APIReconcilerBuilder[T, C] {
+	b.apiReconciler.providerConfig.Store(&config)
+	return b
 }
 
 // Reconcile orchestrates platform and (domain specific) Reconciler logic to reconcile API objects
-func (r *APIReconciler[T, PC]) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, reconcileErr error) {
+func (r *APIReconciler[T, C]) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, reconcileErr error) {
 	l := logf.FromContext(ctx)
 	// common reconciler logic including get obj, providerconfig, mcp/workload access
 	obj := r.emptyObj()
@@ -121,7 +154,7 @@ func (r *APIReconciler[T, PC]) Reconcile(ctx context.Context, req ctrl.Request) 
 		StatusProgressing(obj, reasonReconcileError, "No ProviderConfig found")
 		return ctrl.Result{}, errors.New("provider config missing")
 	}
-	providerConfigCopy := (*providerConfig).DeepCopyObject().(PC)
+	providerConfigCopy := (*providerConfig).DeepCopyObject().(C)
 	// core crud
 	deleted := !obj.GetDeletionTimestamp().IsZero()
 	var res ctrl.Result
@@ -156,7 +189,7 @@ func (r *APIReconciler[T, PC]) updateStatus(ctx context.Context, newObj T, oldOb
 
 // delete eventually invokes the domain delete logic of a service provider and is the place to implement
 // common logic that should be abstracted away from a service provider developer like handling cluster access.
-func (r *APIReconciler[T, PC]) delete(ctx context.Context, obj T, pc PC) (ctrl.Result, error) {
+func (r *APIReconciler[T, C]) delete(ctx context.Context, obj T, config C) (ctrl.Result, error) {
 	req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(obj)}
 	accessRequestsInDeletion, err := r.areAccessRequestsInDeletion(ctx, req)
 	if err != nil {
@@ -173,7 +206,7 @@ func (r *APIReconciler[T, PC]) delete(ctx context.Context, obj T, pc PC) (ctrl.R
 			terminatingWithReason(obj, "Reconciling", "cluster cleanup")
 			return res, nil
 		}
-		res, err = r.reconciler.Delete(ctx, obj, pc, clusters)
+		res, err = r.reconciler.Delete(ctx, obj, config, clusters)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -202,7 +235,7 @@ func (r *APIReconciler[T, PC]) delete(ctx context.Context, obj T, pc PC) (ctrl.R
 
 // createOrUpdate eventually invokes the domain createOrUpdate logic of a service provider and is the place to implement
 // common logic that should be abstracted away from a service provider developer like handling cluster access.
-func (r *APIReconciler[T, PC]) createOrUpdate(ctx context.Context, obj T, pc PC) (ctrl.Result, error) {
+func (r *APIReconciler[T, C]) createOrUpdate(ctx context.Context, obj T, config C) (ctrl.Result, error) {
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.onboardingCluster.Client(), obj, func() error {
 		controllerutil.AddFinalizer(obj, obj.Finalizer())
 		return nil
@@ -219,13 +252,13 @@ func (r *APIReconciler[T, PC]) createOrUpdate(ctx context.Context, obj T, pc PC)
 	if res.RequeueAfter > 0 {
 		return res, nil
 	}
-	return r.reconciler.CreateOrUpdate(ctx, obj, pc, clusters)
+	return r.reconciler.CreateOrUpdate(ctx, obj, config, clusters)
 }
 
 // areAccessRequestsInDeletion determines if the access requests for a reconcile request are in deletion.
 // It returns true if any access requests (mcp, workload) is deleted or has a deletion timestamp.
 // It is used to prevent renewing cluster access when deleting an ServiceProviderAPI object.
-func (r *APIReconciler[T, PC]) areAccessRequestsInDeletion(ctx context.Context, req ctrl.Request) (bool, error) {
+func (r *APIReconciler[T, C]) areAccessRequestsInDeletion(ctx context.Context, req ctrl.Request) (bool, error) {
 	accessRequest, err := r.clusterAccessReconciler.MCPAccessRequest(ctx, req)
 	if apierrors.IsNotFound(err) || (accessRequest != nil && accessRequest.DeletionTimestamp != nil) {
 		return true, nil
@@ -247,7 +280,7 @@ func (r *APIReconciler[T, PC]) areAccessRequestsInDeletion(ctx context.Context, 
 
 // clusters returns any request scoped cluster that a servicer provider developer might want to access in order
 // to delivery its service.
-func (r *APIReconciler[T, PC]) clusters(ctx context.Context, req ctrl.Request) (ClusterContext, ctrl.Result, error) {
+func (r *APIReconciler[T, C]) clusters(ctx context.Context, req ctrl.Request) (ClusterContext, ctrl.Result, error) {
 	clusters := ClusterContext{}
 	res, err := r.clusterAccessReconciler.Reconcile(ctx, req)
 	if err != nil {
@@ -288,7 +321,7 @@ func (r *APIReconciler[T, PC]) clusters(ctx context.Context, req ctrl.Request) (
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *APIReconciler[T, PC]) SetupWithManager(mgr ctrl.Manager, name string, providerConfigUpdates chan event.GenericEvent) error {
+func (r *APIReconciler[T, C]) SetupWithManager(mgr ctrl.Manager, name string, providerConfigUpdates chan event.GenericEvent) error {
 	controller := ctrl.NewControllerManagedBy(mgr).
 		For(r.emptyObj()).
 		// sets up reconciles whenever provider config controller sends update events
@@ -299,7 +332,7 @@ func (r *APIReconciler[T, PC]) SetupWithManager(mgr ctrl.Manager, name string, p
 					func(ctx context.Context, obj client.Object) []reconcile.Request {
 						// update cached provider config
 						if obj != nil {
-							c := obj.DeepCopyObject().(PC)
+							c := obj.DeepCopyObject().(C)
 							r.providerConfig.Store(&c)
 						} else {
 							r.providerConfig.Store(nil)
@@ -311,7 +344,7 @@ func (r *APIReconciler[T, PC]) SetupWithManager(mgr ctrl.Manager, name string, p
 		)
 
 	// Optional: watch secrets on the platform cluster if the reconciler implements SecretWatcher
-	if sw, ok := r.reconciler.(SecretWatcher[PC]); ok && r.secretNamespace != "" {
+	if sw, ok := r.reconciler.(SecretWatcher[C]); ok && r.secretNamespace != "" {
 		controller = controller.WatchesRawSource(
 			source.Kind(
 				r.platformCluster.Cluster().GetCache(),
@@ -331,9 +364,9 @@ func (r *APIReconciler[T, PC]) SetupWithManager(mgr ctrl.Manager, name string, p
 
 // mapSecretToRequests returns a typed map function that checks whether a changed secret
 // is referenced by the service provider and, if so, enqueues all ServiceProviderAPI objects.
-func (r *APIReconciler[T, PC]) mapSecretToRequests(sw SecretWatcher[PC]) func(ctx context.Context, secret *corev1.Secret) []reconcile.Request {
+func (r *APIReconciler[T, C]) mapSecretToRequests(sw SecretWatcher[C]) func(ctx context.Context, secret *corev1.Secret) []reconcile.Request {
 	return func(ctx context.Context, secret *corev1.Secret) []reconcile.Request {
-		var pcVal PC
+		var pcVal C
 		if pc := r.providerConfig.Load(); pc != nil {
 			pcVal = *pc
 		}
@@ -345,7 +378,7 @@ func (r *APIReconciler[T, PC]) mapSecretToRequests(sw SecretWatcher[PC]) func(ct
 }
 
 // enqueueAllObjects lists all ServiceProviderAPI objects and returns a reconcile request for each.
-func (r *APIReconciler[T, PC]) enqueueAllObjects(ctx context.Context) []reconcile.Request {
+func (r *APIReconciler[T, C]) enqueueAllObjects(ctx context.Context) []reconcile.Request {
 	var list unstructured.UnstructuredList
 	gvk, err := apiutil.GVKForObject(r.emptyObj(), r.onboardingCluster.Scheme())
 	if err != nil {
@@ -367,7 +400,7 @@ func (r *APIReconciler[T, PC]) enqueueAllObjects(ctx context.Context) []reconcil
 }
 
 func retrieveSecretKey(ar *clustersv1alpha1.AccessRequest) client.ObjectKey {
-	if ar.Status.SecretRef == nil {
+	if ar == nil || ar.Status.SecretRef == nil {
 		return client.ObjectKey{}
 	}
 	return client.ObjectKey{
