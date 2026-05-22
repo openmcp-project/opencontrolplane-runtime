@@ -99,14 +99,14 @@ func (b *APIReconcilerBuilder[T, C]) OnboardingCluster(c *clusters.Cluster) *API
 }
 
 // ClusterAccessReconciler sets the cluster access reconciler.
-func (b *APIReconcilerBuilder[T, C]) ClusterAccessReconciler(car clusteraccess.Provider) *APIReconcilerBuilder[T, C] {
-	b.apiReconciler.clusterAccessProvider = car
+func (b *APIReconcilerBuilder[T, C]) ClusterAccessReconciler(provider clusteraccess.Provider) *APIReconcilerBuilder[T, C] {
+	b.apiReconciler.clusterAccessProvider = provider
 	return b
 }
 
 // Reconciler sets the reconciler for a concrete API type.
-func (b *APIReconcilerBuilder[T, C]) Reconciler(dsr Reconciler[T, C]) *APIReconcilerBuilder[T, C] {
-	b.apiReconciler.reconciler = dsr
+func (b *APIReconcilerBuilder[T, C]) Reconciler(reconciler Reconciler[T, C]) *APIReconcilerBuilder[T, C] {
+	b.apiReconciler.reconciler = reconciler
 	return b
 }
 
