@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/openmcp-project/opencontrolplane-runtime/pkg/serviceprovider/clusteraccess"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -12,9 +13,9 @@ import (
 // Reconciler implements any business logic required to manage API objects
 type Reconciler[T API, C Config] interface {
 	// CreateOrUpdate is called on every add or update event
-	CreateOrUpdate(ctx context.Context, obj T, config C, clusters ClusterContext) (ctrl.Result, error)
+	CreateOrUpdate(ctx context.Context, obj T, config C, clusters clusteraccess.ClusterContext) (ctrl.Result, error)
 	// Delete is called on every delete event
-	Delete(ctx context.Context, obj T, config C, clusters ClusterContext) (ctrl.Result, error)
+	Delete(ctx context.Context, obj T, config C, clusters clusteraccess.ClusterContext) (ctrl.Result, error)
 }
 
 // API represents the end-user facing API type

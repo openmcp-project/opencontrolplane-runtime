@@ -23,6 +23,7 @@ import (
 
 	"github.com/go-logr/zapr"
 	"github.com/openmcp-project/controller-utils/pkg/clusters"
+	"github.com/openmcp-project/opencontrolplane-runtime/pkg/serviceprovider/clusteraccess"
 	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
 	"github.com/openmcp-project/openmcp-operator/api/common"
 	apiconst "github.com/openmcp-project/openmcp-operator/api/constants"
@@ -344,20 +345,20 @@ func assertStatusUpdate(t *testing.T, c client.Client, req ctrl.Request, wantSta
 	assert.Equal(t, wantStatusPhase, status.Phase)
 }
 
-var _ ClusterAccessProvider = FakeClusterAccessProvider{}
+var _ clusteraccess.Provider = FakeClusterAccessProvider{}
 var _ Reconciler[*fakeApiImpl, *fakeProviderConfigImpl] = &MockServiceProviderReconciler{}
 
 type MockServiceProviderReconciler struct {
 	apiObj               API
 	config               Config
-	clusterContext       ClusterContext
+	clusterContext       clusteraccess.ClusterContext
 	createOrUpdateCalled bool
 	deleteCalled         bool
 	wantError            bool
 }
 
 // CreateOrUpdate implements [Reconciler].
-func (f *MockServiceProviderReconciler) CreateOrUpdate(_ context.Context, obj *fakeApiImpl, pc *fakeProviderConfigImpl, cc ClusterContext) (ctrl.Result, error) {
+func (f *MockServiceProviderReconciler) CreateOrUpdate(_ context.Context, obj *fakeApiImpl, pc *fakeProviderConfigImpl, cc clusteraccess.ClusterContext) (ctrl.Result, error) {
 	f.apiObj = obj
 	f.config = pc
 	f.clusterContext = cc
@@ -371,7 +372,7 @@ func (f *MockServiceProviderReconciler) CreateOrUpdate(_ context.Context, obj *f
 }
 
 // Delete implements [Reconciler].
-func (f *MockServiceProviderReconciler) Delete(_ context.Context, obj *fakeApiImpl, pc *fakeProviderConfigImpl, cc ClusterContext) (ctrl.Result, error) {
+func (f *MockServiceProviderReconciler) Delete(_ context.Context, obj *fakeApiImpl, pc *fakeProviderConfigImpl, cc clusteraccess.ClusterContext) (ctrl.Result, error) {
 	f.apiObj = obj
 	f.config = pc
 	f.clusterContext = cc
