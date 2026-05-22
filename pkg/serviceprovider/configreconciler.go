@@ -48,6 +48,9 @@ func (b *ConfigReconcilerBuilder[T]) MustBuild() *ConfigReconciler[T] {
 	if b.configReconciler.providerUpdateChannel == nil {
 		panic("update channel is required")
 	}
+	if b.configReconciler.providerName == "" {
+		panic("provider name is required")
+	}
 	return &b.configReconciler
 }
 
