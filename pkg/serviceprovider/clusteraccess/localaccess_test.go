@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/openmcp-project/controller-utils/pkg/clusters"
+	"github.com/openmcp-project/opencontrolplane-runtime/pkg/clusterprovider"
 	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
 	"github.com/openmcp-project/openmcp-operator/api/common"
 	"github.com/openmcp-project/openmcp-operator/lib/clusteraccess"
@@ -38,7 +39,7 @@ func Test_localAccessProvider_MCPCluster(t *testing.T) {
 					Name:      "mcp-access",
 					Namespace: metav1.NamespaceDefault,
 					Annotations: map[string]string{
-						localAnnotationKey: localAPIServer,
+						clusterprovider.LocalAccessAnnotation: localAPIServer,
 					},
 				},
 			},
@@ -97,7 +98,7 @@ func Test_localAccessProvider_WorkloadCluster(t *testing.T) {
 					Name:      "workload-access",
 					Namespace: metav1.NamespaceDefault,
 					Annotations: map[string]string{
-						localAnnotationKey: localAPIServer,
+						clusterprovider.LocalAccessAnnotation: localAPIServer,
 					},
 				},
 			},

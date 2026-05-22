@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/openmcp-project/controller-utils/pkg/clusters"
+	"github.com/openmcp-project/opencontrolplane-runtime/pkg/clusterprovider"
 	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
 	"github.com/openmcp-project/openmcp-operator/api/common"
 	"github.com/openmcp-project/openmcp-operator/lib/clusteraccess"
@@ -40,7 +41,7 @@ func (s *localClusterAccessReconciler) MCPCluster(ctx context.Context, request r
 		return cluster, err
 	}
 	// patch cluster client with annotation value
-	return MustPatchClusterClient(ctx, ar, cluster), nil
+	return mustPatchClusterClient(ctx, ar, cluster), nil
 }
 
 // WorkloadCluster implements [Provider].
@@ -54,7 +55,7 @@ func (s *localClusterAccessReconciler) WorkloadCluster(ctx context.Context, requ
 		return cluster, err
 	}
 	// patch cluster client with annotation value
-	return MustPatchClusterClient(ctx, ar, cluster), nil
+	return mustPatchClusterClient(ctx, ar, cluster), nil
 }
 
 // SkipWorkloadCluster implements [clusteraccess.Reconciler].
@@ -111,21 +112,20 @@ func (s *localClusterAccessReconciler) WithWorkloadScheme(scheme *runtime.Scheme
 // metadata:
 //
 //	annotations:
-//	  kind.clusters.openmcp.cloud/localhost: https://127.0.0.1:42827
-const localAnnotationKey = "kind.clusters.openmcp.cloud/localhost"
+//	  clusters.open-control-plane.io/local-access: https://127.0.0.1:42827
 
-// MustPatchClusterClient replaces the cluster client with the host value of the local AR annotation.
+// mustPatchClusterClient replaces the cluster client with the host value of the local AR annotation.
 // If no local annotation is present then the original cluster of the wrapped reconciler is returned.
-func MustPatchClusterClient(ctx context.Context, ar *clustersv1alpha1.AccessRequest, cluster *clusters.Cluster) *clusters.Cluster {
+func mustPatchClusterClient(ctx context.Context, ar *clustersv1alpha1.AccessRequest, cluster *clusters.Cluster) *clusters.Cluster {
 	annotations := ar.GetAnnotations()
 	if annotations == nil {
 		logf.FromContext(ctx).Info("debug access provider used but no annotations set")
 		return cluster
 	}
 
-	value, exists := annotations[localAnnotationKey]
+	value, exists := annotations[clusterprovider.LocalAccessAnnotation]
 	if !exists {
-		logf.FromContext(ctx).Info("debug access provider used but local annotation key not found", "key", localAnnotationKey)
+		logf.FromContext(ctx).Info("debug access provider used but local annotation key not found", "key", clusterprovider.LocalAccessAnnotation)
 		return cluster
 	}
 
