@@ -1,4 +1,4 @@
-package serviceprovider
+package clusteraccess
 
 import (
 	"context"
@@ -9,8 +9,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
-// ClusterAccessProvider is a light weight version of the ClusterAccessReconciler
-type ClusterAccessProvider interface {
+// Provider is a light weight version of the ClusterAccessReconciler
+type Provider interface {
 	// MCPCluster creates a Cluster for the MCP AccessRequest.
 	// This function will only be successful if the MCP AccessRequest is granted and Reconcile returned without an error
 	// and a reconcile.Result with no RequeueAfter value.
