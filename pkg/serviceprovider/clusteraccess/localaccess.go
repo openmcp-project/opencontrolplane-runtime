@@ -41,7 +41,7 @@ func (s *localClusterAccessReconciler) MCPCluster(ctx context.Context, request r
 		return cluster, err
 	}
 	// patch cluster client with annotation value
-	return mustPatchClusterClient(ctx, ar, cluster), nil
+	return MustPatchClusterClient(ctx, ar, cluster), nil
 }
 
 // WorkloadCluster implements [Provider].
@@ -55,7 +55,7 @@ func (s *localClusterAccessReconciler) WorkloadCluster(ctx context.Context, requ
 		return cluster, err
 	}
 	// patch cluster client with annotation value
-	return mustPatchClusterClient(ctx, ar, cluster), nil
+	return MustPatchClusterClient(ctx, ar, cluster), nil
 }
 
 // SkipWorkloadCluster implements [clusteraccess.Reconciler].
@@ -114,9 +114,9 @@ func (s *localClusterAccessReconciler) WithWorkloadScheme(scheme *runtime.Scheme
 //	annotations:
 //	  clusters.open-control-plane.io/local-access: https://127.0.0.1:42827
 
-// mustPatchClusterClient replaces the cluster client with the host value of the local AR annotation.
+// MustPatchClusterClient replaces the cluster client with the host value of the local AR annotation.
 // If no local annotation is present then the original cluster of the wrapped reconciler is returned.
-func mustPatchClusterClient(ctx context.Context, ar *clustersv1alpha1.AccessRequest, cluster *clusters.Cluster) *clusters.Cluster {
+func MustPatchClusterClient(ctx context.Context, ar *clustersv1alpha1.AccessRequest, cluster *clusters.Cluster) *clusters.Cluster {
 	annotations := ar.GetAnnotations()
 	if annotations == nil {
 		logf.FromContext(ctx).Info("debug access provider used but no annotations set")
