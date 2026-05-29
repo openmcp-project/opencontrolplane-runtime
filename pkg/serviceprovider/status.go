@@ -15,7 +15,8 @@ const (
 	// StatusPhaseTerminating indicates that the resource is not ready and in deletion.
 	StatusPhaseTerminating = "Terminating"
 
-	reasonReconcileError = "ReconcileError"
+	reasonReconcileError              = "ReconcileError"
+	reasonManagedControlPlaneNotFound = "ManagedControlPlaneNotFound"
 )
 
 // StatusProgressing indicates progressing with synced false
