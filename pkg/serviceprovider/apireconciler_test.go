@@ -262,6 +262,7 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 			}
 			builder := NewAPIReconcilerBuilder[*fakeApiImpl, *fakeProviderConfigImpl]().
 				EmptyObjectProvider(func() *fakeApiImpl { return &fakeApiImpl{} }).
+				EmptyConfigProvider(func() *fakeProviderConfigImpl { return &fakeProviderConfigImpl{} }).
 				OnboardingCluster(onboardingCluster).
 				PlatformCluster(platformCluster).
 				ClusterAccessReconciler(FakeClusterAccessProvider{
@@ -292,9 +293,6 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 				}).
 				Reconciler(mockReconciler).
 				WorkloadCluster(true)
-			if tt.providerConfig != nil {
-				builder.ProviderConfig(tt.providerConfig)
-			}
 			r := builder.MustBuild()
 			got, gotErr := r.Reconcile(context.Background(), tt.req)
 			if gotErr != nil {
@@ -710,9 +708,6 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 				}).
 				Reconciler(mockReconciler).
 				WorkloadCluster(true)
-			if tt.providerConfig != nil {
-				builder.ProviderConfig(tt.providerConfig)
-			}
 			r := builder.MustBuild()
 			got, gotErr := r.Reconcile(context.Background(), tt.req)
 			if gotErr != nil {
@@ -934,7 +929,6 @@ func TestMapSecretToRequests(t *testing.T) {
 				onboardingCluster: onboardingCluster,
 				reconciler:        mockSW,
 			}
-			r.providerConfig.Store(&tt.providerConfig)
 
 			mapFn := r.mapSecretToRequests(mockSW)
 			reqs := mapFn(context.Background(), tt.secret)
@@ -1068,7 +1062,6 @@ func TestMapConfigMapToRequests(t *testing.T) {
 				onboardingCluster: onboardingCluster,
 				reconciler:        mockCW,
 			}
-			r.providerConfig.Store(&tt.providerConfig)
 
 			mapFn := r.mapConfigMapToRequests(mockCW)
 			reqs := mapFn(context.Background(), tt.configMap)
@@ -1085,4 +1078,23 @@ func TestMapConfigMapToRequests(t *testing.T) {
 			}
 		})
 	}
+}
+
+var _ Config = &fakeProviderConfigImpl{}
+
+type fakeProviderConfigImpl struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	FakePollInterval  time.Duration
+}
+
+func (f *fakeProviderConfigImpl) DeepCopyObject() runtime.Object {
+	return &fakeProviderConfigImpl{
+		ObjectMeta:       *f.DeepCopy(),
+		FakePollInterval: f.PollInterval(),
+	}
+}
+
+func (f *fakeProviderConfigImpl) PollInterval() time.Duration {
+	return f.FakePollInterval
 }
