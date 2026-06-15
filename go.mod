@@ -4,7 +4,7 @@ go 1.26.4
 
 require (
 	github.com/go-logr/zapr v1.3.0
-	github.com/openmcp-project/controller-utils v0.29.0
+	github.com/openmcp-project/controller-utils v0.29.1
 	github.com/openmcp-project/openmcp-operator/api v1.0.1
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/zap v1.28.0
