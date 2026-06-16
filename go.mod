@@ -4,7 +4,7 @@ go 1.26.4
 
 require (
 	github.com/go-logr/zapr v1.3.0
-	github.com/openmcp-project/controller-utils v0.29.1
+	github.com/openmcp-project/controller-utils v0.30.0
 	github.com/openmcp-project/openmcp-operator/api v1.0.1
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/zap v1.28.0
@@ -15,7 +15,7 @@ require (
 	sigs.k8s.io/controller-runtime v0.24.1
 )
 
-require golang.org/x/exp v0.0.0-20260508232706-74f9aab9d74a // indirect
+require golang.org/x/exp v0.0.0-20260611194520-c48552f49976 // indirect
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -57,7 +57,7 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
-	golang.org/x/net v0.55.0 // indirect
+	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
