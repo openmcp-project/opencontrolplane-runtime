@@ -556,7 +556,7 @@ func TestMapSecretToRequests(t *testing.T) {
 			referenced:     map[string]bool{secretName: true},
 			providerConfig: &fakeProviderConfigImpl{FakePollInterval: time.Hour},
 			existingObjs: []client.Object{
-				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-1", Namespace: testNamespaceName}},
+				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-1", Namespace: testNamespaceName}}, //nolint:goconst
 				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-2", Namespace: testNamespaceName}},
 			},
 			wantRequests: 2,
