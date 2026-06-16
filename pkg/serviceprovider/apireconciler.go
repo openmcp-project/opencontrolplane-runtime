@@ -43,6 +43,8 @@ type APIReconciler[T API, C Config] struct {
 	withWorkloadCluster bool
 	// secretNamespace is the namespace to watch secrets in on the platform cluster. Used only if the ServiceProviderReconciler also implements SecretWatcher.
 	secretNamespace string
+	// configMapNamespace is the namespace to watch ConfigMaps in on the platform cluster. Used only if the ServiceProviderReconciler also implements ConfigMapWatcher.
+	configMapNamespace string
 	// emptyObj creates an empty object of the api type
 	emptyObj func() T
 }
@@ -120,6 +122,13 @@ func (b *APIReconcilerBuilder[T, C]) WorkloadCluster(wlCluster bool) *APIReconci
 // Only used if the ServiceProviderReconciler also implements SecretWatcher.
 func (b *APIReconcilerBuilder[T, C]) SecretNamespace(ns string) *APIReconcilerBuilder[T, C] {
 	b.apiReconciler.secretNamespace = ns
+	return b
+}
+
+// ConfigMapNamespace enables ConfigMap watching in the given namespace on the platform cluster.
+// Only used if the ServiceProviderReconciler also implements ConfigMapWatcher.
+func (b *APIReconcilerBuilder[T, C]) ConfigMapNamespace(ns string) *APIReconcilerBuilder[T, C] {
+	b.apiReconciler.configMapNamespace = ns
 	return b
 }
 
@@ -360,6 +369,22 @@ func (r *APIReconciler[T, C]) SetupWithManager(mgr ctrl.Manager, name string, pr
 		)
 	}
 
+	// Optional: watch ConfigMaps on the platform cluster if the reconciler implements ConfigMapWatcher
+	if cw, ok := r.reconciler.(ConfigMapWatcher[C]); ok && r.configMapNamespace != "" {
+		controller = controller.WatchesRawSource(
+			source.Kind(
+				r.platformCluster.Cluster().GetCache(),
+				&corev1.ConfigMap{},
+				handler.TypedEnqueueRequestsFromMapFunc(r.mapConfigMapToRequests(cw)),
+				controllerutil2.ToTypedPredicate[*corev1.ConfigMap](
+					predicate.NewPredicateFuncs(func(obj client.Object) bool {
+						return obj.GetNamespace() == r.configMapNamespace
+					}),
+				),
+			),
+		)
+	}
+
 	return controller.Named(name).Complete(r)
 }
 
@@ -372,6 +397,21 @@ func (r *APIReconciler[T, C]) mapSecretToRequests(sw SecretWatcher[C]) func(ctx 
 			pcVal = *pc
 		}
 		if !sw.IsReferencedSecret(ctx, secret, pcVal) {
+			return nil
+		}
+		return r.enqueueAllObjects(ctx)
+	}
+}
+
+// mapConfigMapToRequests returns a typed map function that checks whether a changed ConfigMap
+// is referenced by the service provider and, if so, enqueues all ServiceProviderAPI objects.
+func (r *APIReconciler[T, C]) mapConfigMapToRequests(cw ConfigMapWatcher[C]) func(ctx context.Context, configMap *corev1.ConfigMap) []reconcile.Request {
+	return func(ctx context.Context, configMap *corev1.ConfigMap) []reconcile.Request {
+		var pcVal C
+		if pc := r.providerConfig.Load(); pc != nil {
+			pcVal = *pc
+		}
+		if !cw.IsReferencedConfigMap(ctx, configMap, pcVal) {
 			return nil
 		}
 		return r.enqueueAllObjects(ctx)

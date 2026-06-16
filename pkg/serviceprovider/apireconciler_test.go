@@ -497,6 +497,18 @@ func (m *MockSecretWatchingReconciler) IsReferencedSecret(_ context.Context, sec
 	return m.referencedSecrets[secret.Name]
 }
 
+// MockConfigMapWatchingReconciler satisfies both ServiceProviderReconciler and ConfigMapWatcher.
+type MockConfigMapWatchingReconciler struct {
+	MockServiceProviderReconciler
+	referencedConfigMaps map[string]bool
+}
+
+var _ ConfigMapWatcher[*fakeProviderConfigImpl] = &MockConfigMapWatchingReconciler{}
+
+func (m *MockConfigMapWatchingReconciler) IsReferencedConfigMap(_ context.Context, configMap *corev1.ConfigMap, _ *fakeProviderConfigImpl) bool {
+	return m.referencedConfigMaps[configMap.Name]
+}
+
 // createFakeClusterWithUnstructuredList creates a fake cluster whose client supports
 // listing unstructured objects by intercepting List calls and populating the result
 // from the given objects.
@@ -544,7 +556,7 @@ func TestMapSecretToRequests(t *testing.T) {
 			referenced:     map[string]bool{secretName: true},
 			providerConfig: &fakeProviderConfigImpl{FakePollInterval: time.Hour},
 			existingObjs: []client.Object{
-				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-1", Namespace: testNamespaceName}},
+				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-1", Namespace: testNamespaceName}}, //nolint:goconst
 				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-2", Namespace: testNamespaceName}},
 			},
 			wantRequests: 2,
@@ -656,6 +668,95 @@ func TestAPIReconciler_enqueueAllObjects(t *testing.T) {
 				assert.Equal(t, tt.wantErrorMessage, logs[0].Message)
 			}
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestMapConfigMapToRequests(t *testing.T) {
+	const configMapName = "my-configmap"
+	tests := []struct {
+		name           string
+		configMap      *corev1.ConfigMap
+		referenced     map[string]bool
+		providerConfig *fakeProviderConfigImpl
+		existingObjs   []client.Object
+		wantRequests   int
+	}{
+		{
+			name: "referenced ConfigMap with existing objects triggers reconciliation",
+			configMap: &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: testNamespaceName},
+			},
+			referenced:     map[string]bool{configMapName: true},
+			providerConfig: &fakeProviderConfigImpl{FakePollInterval: time.Hour},
+			existingObjs: []client.Object{
+				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-1", Namespace: testNamespaceName}},
+				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-2", Namespace: testNamespaceName}},
+			},
+			wantRequests: 2,
+		},
+		{
+			name: "unreferenced ConfigMap does not trigger reconciliation",
+			configMap: &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{Name: "other-configmap", Namespace: testNamespaceName},
+			},
+			referenced:     map[string]bool{configMapName: true},
+			providerConfig: &fakeProviderConfigImpl{FakePollInterval: time.Hour},
+			existingObjs: []client.Object{
+				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-1", Namespace: testNamespaceName}},
+			},
+			wantRequests: 0,
+		},
+		{
+			name: "referenced ConfigMap with no existing objects returns empty",
+			configMap: &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: testNamespaceName},
+			},
+			referenced:     map[string]bool{configMapName: true},
+			providerConfig: &fakeProviderConfigImpl{FakePollInterval: time.Hour},
+			existingObjs:   nil,
+			wantRequests:   0,
+		},
+		{
+			name: "nil provider config does not panic",
+			configMap: &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: testNamespaceName},
+			},
+			referenced:     map[string]bool{configMapName: true},
+			providerConfig: nil,
+			existingObjs:   nil,
+			wantRequests:   0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			onboardingCluster := createFakeClusterWithUnstructuredList(t, "onboarding", tt.existingObjs)
+
+			mockCW := &MockConfigMapWatchingReconciler{
+				referencedConfigMaps: tt.referenced,
+			}
+
+			r := &APIReconciler[*fakeApiImpl, *fakeProviderConfigImpl]{
+				emptyObj:          func() *fakeApiImpl { return &fakeApiImpl{} },
+				onboardingCluster: onboardingCluster,
+				reconciler:        mockCW,
+			}
+			r.providerConfig.Store(&tt.providerConfig)
+
+			mapFn := r.mapConfigMapToRequests(mockCW)
+			reqs := mapFn(context.Background(), tt.configMap)
+			assert.Equal(t, tt.wantRequests, len(reqs))
+
+			if tt.wantRequests > 0 {
+				names := make(map[string]bool)
+				for _, req := range reqs {
+					names[req.Name] = true
+				}
+				for _, obj := range tt.existingObjs {
+					assert.True(t, names[obj.GetName()], "expected request for object %s", obj.GetName())
+				}
+			}
 		})
 	}
 }

@@ -8,7 +8,7 @@ import (
 
 // SecretWatcher can optionally be implemented by a Reconciler to trigger reconciliation
 // of all API objects when a referenced secret in the provider namespace changes.
-// The watch is set up on the platform cluster and filtered to the namespace configured via WithSecretNamespace.
+// The watch is set up on the platform cluster and filtered to the namespace configured via SecretNamespace.
 type SecretWatcher[PC Config] interface {
 	// IsReferencedSecret returns true if the given secret should trigger
 	// reconciliation. pc is the current provider config — it will be the
