@@ -54,8 +54,8 @@ type APIReconciler[T API, C Config] struct {
 	configMapNamespace string
 	// emptyObj creates an empty object of the api type
 	emptyObj func() T
-	// additionalDataGenerators is an optional list of functions called during reconciliation.
-	// They are only executed when  outputs are collected and forwarded to the AdvancedProvider as additionalData.
+	// additionalDataGenerators is an optional list of functions which called during reconciliation.
+	// Their outputs are collected and forwarded as additionalData to the advanced cluster access reconciler.
 	additionalDataGenerators []func(ctx context.Context, obj T, config C) (any, error)
 }
 
@@ -158,8 +158,7 @@ func (b *APIReconcilerBuilder[T, C]) ConfigMapNamespace(ns string) *APIReconcile
 }
 
 // AdditionalDataGenerators registers functions that are called during reconciliation.
-// Each function receives the API object and the provider config, and its return value is
-// collected and passed as additionalData to the AdvancedProvider methods.
+// Their output is collected and passed as additionalData to the advanced cluster access reconciler methods.
 func (b *APIReconcilerBuilder[T, C]) AdditionalDataGenerators(generators ...func(ctx context.Context, obj T, config C) (any, error)) *APIReconcilerBuilder[T, C] {
 	b.apiReconciler.additionalDataGenerators = append(b.apiReconciler.additionalDataGenerators, generators...)
 	return b
