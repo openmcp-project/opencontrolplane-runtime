@@ -72,6 +72,8 @@ func NewAPIReconcilerBuilder[T API, C Config]() *APIReconcilerBuilder[T, C] {
 }
 
 // MustBuild validates every required field has been set and returns the APIReconciler.
+//
+//nolint:gocyclo
 func (b *APIReconcilerBuilder[T, C]) MustBuild() *APIReconciler[T, C] {
 	// validate required fields
 	if b.apiReconciler.clusterAccessProvider == nil && b.apiReconciler.advancedClusterAccessProvider == nil {
