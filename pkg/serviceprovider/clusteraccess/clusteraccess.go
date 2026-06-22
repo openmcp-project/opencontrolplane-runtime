@@ -31,7 +31,7 @@ type Provider interface {
 	// The reconcile.Result may contain a RequeueAfter value to indicate that the reconciliation should be retried after a certain duration.
 	Reconcile(ctx context.Context, request reconcile.Request) (reconcile.Result, error)
 	// ReconcileDelete deletes the AccessRequests and ClusterRequests for the MCP and Workload clusters based on the reconciled object.
-	// This function sh^ould be called during the deletion of the reconciled object.
+	// This function should be called during the deletion of the reconciled object.
 	// ctx is the context for the reconciliation.
 	// request is the object that is being reconciled.
 	// It returns a reconcile.Result and an error if the reconciliation failed.
