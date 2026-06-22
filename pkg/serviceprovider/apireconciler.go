@@ -54,8 +54,8 @@ type APIReconciler[T API, C Config] struct {
 	configMapNamespace string
 	// emptyObj creates an empty object of the api type
 	emptyObj func() T
-	// additionalDataGenerators is an optional list of functions which called during reconciliation.
-	// Their outputs are collected and forwarded as additionalData to the advanced cluster access reconciler.
+	// additionalDataGenerators is an optional list of functions which are called during reconciliation.
+	// Their outputs are collected and forwarded as additionalData to only the advanced cluster access reconciler.
 	additionalDataGenerators []func(ctx context.Context, obj T, config C) (any, error)
 }
 
@@ -197,6 +197,7 @@ func (r *APIReconciler[T, C]) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, errors.New("provider config missing")
 	}
 	providerConfigCopy := (*providerConfig).DeepCopyObject().(C)
+	// generate additional data
 	additionalData, err := r.generateAdditionalData(ctx, obj, providerConfigCopy)
 	if err != nil {
 		StatusProgressing(obj, reasonReconcileError, "failed to generate additional data")
@@ -327,7 +328,7 @@ func (r *APIReconciler[T, C]) areAccessRequestsInDeletion(ctx context.Context, r
 		if r.advancedClusterAccessProvider != nil {
 			accessRequest, err = r.advancedClusterAccessProvider.AccessRequest(ctx, req, workloadID, additionalData...)
 		} else {
-			accessRequest, err = r.clusterAccessProvider.MCPAccessRequest(ctx, req)
+			accessRequest, err = r.clusterAccessProvider.WorkloadAccessRequest(ctx, req)
 		}
 		if apierrors.IsNotFound(err) || (accessRequest != nil && accessRequest.DeletionTimestamp != nil) {
 			return true, nil
@@ -384,7 +385,7 @@ func (r *APIReconciler[T, C]) clusters(ctx context.Context, req ctrl.Request, ad
 		if r.advancedClusterAccessProvider != nil {
 			workloadCluster, err = r.advancedClusterAccessProvider.Access(ctx, req, workloadID, additionalData...)
 		} else {
-			workloadCluster, err = r.clusterAccessProvider.MCPCluster(ctx, req)
+			workloadCluster, err = r.clusterAccessProvider.WorkloadCluster(ctx, req)
 		}
 		if err != nil {
 			return clusterContext, ctrl.Result{}, err
