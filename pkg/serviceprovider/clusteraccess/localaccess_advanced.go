@@ -31,7 +31,7 @@ func (s *localAdvancedClusterAccessReconciler) Access(ctx context.Context, reque
 	if err != nil {
 		return cluster, err
 	}
-	ar, err := s.ClusterAccessReconciler.AccessRequest(ctx, request, id, additionalData...)
+	ar, err := s.AccessRequest(ctx, request, id, additionalData...)
 	if err != nil {
 		return cluster, err
 	}

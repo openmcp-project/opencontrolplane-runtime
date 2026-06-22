@@ -47,6 +47,8 @@ const (
 
 	testWorkloadName       = "workload-name"
 	testWorkloadKubeconfig = "workload-kubeconfig"
+
+	testFinalizer = "string"
 )
 
 func TestAPIReconciler_Reconcile(t *testing.T) {
@@ -116,7 +118,7 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 					DeletionTimestamp: &metav1.Time{
 						Time: time.Now(),
 					},
-					Finalizers: []string{"string"},
+					Finalizers: []string{testFinalizer},
 				},
 			},
 			req: ctrl.Request{
@@ -144,7 +146,7 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 					DeletionTimestamp: &metav1.Time{
 						Time: time.Now(),
 					},
-					Finalizers: []string{"string"},
+					Finalizers: []string{testFinalizer},
 				},
 			},
 			req: ctrl.Request{
@@ -170,7 +172,7 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 					DeletionTimestamp: &metav1.Time{
 						Time: time.Now(),
 					},
-					Finalizers: []string{"string"},
+					Finalizers: []string{testFinalizer},
 				},
 			},
 			req: ctrl.Request{
@@ -540,7 +542,7 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 					DeletionTimestamp: &metav1.Time{
 						Time: time.Now(),
 					},
-					Finalizers: []string{"string"},
+					Finalizers: []string{testFinalizer},
 				},
 			},
 			req: ctrl.Request{
@@ -568,7 +570,7 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 					DeletionTimestamp: &metav1.Time{
 						Time: time.Now(),
 					},
-					Finalizers: []string{"string"},
+					Finalizers: []string{testFinalizer},
 				},
 			},
 			req: ctrl.Request{
@@ -594,7 +596,7 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 					DeletionTimestamp: &metav1.Time{
 						Time: time.Now(),
 					},
-					Finalizers: []string{"string"},
+					Finalizers: []string{testFinalizer},
 				},
 			},
 			req: ctrl.Request{

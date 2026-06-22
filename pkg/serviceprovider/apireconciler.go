@@ -236,6 +236,8 @@ func (r *APIReconciler[T, PC]) updateStatus(ctx context.Context, newObj T, oldOb
 
 // delete eventually invokes the domain delete logic of a service provider and is the place to implement
 // common logic that should be abstracted away from a service provider developer like handling cluster access.
+//
+//nolint:gocyclo
 func (r *APIReconciler[T, C]) delete(ctx context.Context, obj T, config C, additionalData []any) (ctrl.Result, error) {
 	req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(obj)}
 	accessRequestsInDeletion, err := r.areAccessRequestsInDeletion(ctx, req, additionalData)
@@ -310,6 +312,8 @@ func (r *APIReconciler[T, C]) createOrUpdate(ctx context.Context, obj T, config 
 // areAccessRequestsInDeletion determines if the access requests for a reconcile request are in deletion.
 // It returns true if any access requests (mcp, workload) is deleted or has a deletion timestamp.
 // It is used to prevent renewing cluster access when deleting an ServiceProviderAPI object.
+//
+//nolint:gocyclo
 func (r *APIReconciler[T, C]) areAccessRequestsInDeletion(ctx context.Context, req ctrl.Request, additionalData []any) (bool, error) {
 	var accessRequest *clustersv1alpha1.AccessRequest
 	var err error
@@ -342,6 +346,8 @@ func (r *APIReconciler[T, C]) areAccessRequestsInDeletion(ctx context.Context, r
 
 // clusters returns any request scoped cluster that a servicer provider developer might want to access in order
 // to delivery its service.
+//
+//nolint:gocyclo
 func (r *APIReconciler[T, C]) clusters(ctx context.Context, req ctrl.Request, additionalData []any) (clusteraccess.ClusterContext, ctrl.Result, error) {
 	clusterContext := clusteraccess.ClusterContext{}
 	var res reconcile.Result
