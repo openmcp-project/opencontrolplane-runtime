@@ -80,6 +80,9 @@ func (b *APIReconcilerBuilder[T, C]) MustBuild() *APIReconciler[T, C] {
 	if b.apiReconciler.clusterAccessProvider != nil && b.apiReconciler.advancedClusterAccessProvider != nil {
 		panic("only one of cluster access provider or advanced cluster access provider can be set")
 	}
+	if len(b.apiReconciler.additionalDataGenerators) > 0 && b.apiReconciler.advancedClusterAccessProvider == nil {
+		panic("additional data generators require an advanced cluster access provider")
+	}
 	if b.apiReconciler.emptyObj == nil {
 		panic("empty object provider is required")
 	}
@@ -116,18 +119,14 @@ func (b *APIReconcilerBuilder[T, C]) OnboardingCluster(c *clusters.Cluster) *API
 // ClusterAccessReconciler sets the cluster access reconciler.
 func (b *APIReconcilerBuilder[T, C]) ClusterAccessReconciler(provider clusteraccess.Provider) *APIReconcilerBuilder[T, C] {
 	b.apiReconciler.clusterAccessProvider = provider
-	if b.apiReconciler.advancedClusterAccessProvider != nil {
-		b.apiReconciler.advancedClusterAccessProvider = nil
-	}
+	b.apiReconciler.advancedClusterAccessProvider = nil
 	return b
 }
 
 // AdvancedClusterAccessReconciler sets the advanced cluster access reconciler.
 func (b *APIReconcilerBuilder[T, C]) AdvancedClusterAccessReconciler(provider clusteraccess.AdvancedProvider) *APIReconcilerBuilder[T, C] {
 	b.apiReconciler.advancedClusterAccessProvider = provider
-	if b.apiReconciler.clusterAccessProvider != nil {
-		b.apiReconciler.clusterAccessProvider = nil
-	}
+	b.apiReconciler.clusterAccessProvider = nil
 	return b
 }
 
