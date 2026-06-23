@@ -247,7 +247,7 @@ func (r *APIReconciler[T, C]) delete(ctx context.Context, obj T, config C, addit
 		return reconcile.Result{}, err
 	}
 	if !accessRequestsInDeletion {
-		clusters, res, err := r.clusters(ctx, req, additionalData)
+		clusterContext, res, err := r.clusters(ctx, req, additionalData)
 		if err != nil {
 			terminatingWithReason(obj, reasonReconcileError, "cluster cleanup error")
 			return ctrl.Result{}, err
@@ -256,7 +256,7 @@ func (r *APIReconciler[T, C]) delete(ctx context.Context, obj T, config C, addit
 			terminatingWithReason(obj, "Reconciling", "cluster cleanup")
 			return res, nil
 		}
-		res, err = r.reconciler.Delete(ctx, obj, config, clusters)
+		res, err = r.reconciler.Delete(ctx, obj, config, clusterContext)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -299,7 +299,7 @@ func (r *APIReconciler[T, C]) createOrUpdate(ctx context.Context, obj T, config 
 		return ctrl.Result{}, err
 	}
 	req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(obj)}
-	clusters, res, err := r.clusters(ctx, req, additionalData)
+	clusterContext, res, err := r.clusters(ctx, req, additionalData)
 	if err != nil {
 		StatusProgressing(obj, reasonReconcileError, "cluster setup error")
 		return ctrl.Result{}, err
@@ -307,7 +307,7 @@ func (r *APIReconciler[T, C]) createOrUpdate(ctx context.Context, obj T, config 
 	if res.RequeueAfter > 0 {
 		return res, nil
 	}
-	return r.reconciler.CreateOrUpdate(ctx, obj, config, clusters)
+	return r.reconciler.CreateOrUpdate(ctx, obj, config, clusterContext)
 }
 
 // areAccessRequestsInDeletion determines if the access requests for a reconcile request are in deletion.
