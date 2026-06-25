@@ -3,6 +3,7 @@ package serviceprovider
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 
 	"github.com/openmcp-project/controller-utils/pkg/clusters"
@@ -10,10 +11,12 @@ import (
 	"github.com/openmcp-project/opencontrolplane-runtime/pkg/serviceprovider/clusteraccess"
 	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
 	apiconst "github.com/openmcp-project/openmcp-operator/api/constants"
+	mcpv2alpha1 "github.com/openmcp-project/openmcp-operator/api/core/v2alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
@@ -94,8 +97,12 @@ func (b *APIReconcilerBuilder[T, C]) PlatformCluster(c *clusters.Cluster) *APIRe
 	return b
 }
 
-// OnboardingCluster set the onboarding cluster.
+// OnboardingCluster sets the onboarding cluster. The runtime registers core.openmcp.cloud/v2alpha1
+// onto the cluster's scheme so it can read ManagedControlPlaneV2 to surface a clear error when the
+// implicitly-referenced MCP for an SP CR doesn't exist; consumers don't need to register this type
+// themselves.
 func (b *APIReconcilerBuilder[T, C]) OnboardingCluster(c *clusters.Cluster) *APIReconcilerBuilder[T, C] {
+	utilruntime.Must(mcpv2alpha1.AddToScheme(c.Scheme()))
 	b.apiReconciler.onboardingCluster = c
 	return b
 }
@@ -165,13 +172,24 @@ func (r *APIReconciler[T, C]) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, errors.New("provider config missing")
 	}
 	providerConfigCopy := (*providerConfig).DeepCopyObject().(C)
+	// Verify the implicitly referenced ManagedControlPlaneV2 exists on the onboarding cluster.
+	// Surfaces a clear status condition for issue #9 instead of waiting forever for an
+	// AccessRequest that can never be granted.
+	mcpFound, err := r.managedControlPlaneExists(ctx, req)
+	if err != nil {
+		StatusProgressing(obj, reasonReconcileError, fmt.Sprintf("failed to look up ManagedControlPlaneV2: %v", err))
+		return ctrl.Result{}, err
+	}
 	// core crud
 	deleted := !obj.GetDeletionTimestamp().IsZero()
 	var res ctrl.Result
-	var err error
 	if deleted {
-		res, err = r.delete(ctx, obj, providerConfigCopy)
+		res, err = r.delete(ctx, obj, providerConfigCopy, mcpFound)
 	} else {
+		if !mcpFound {
+			StatusProgressing(obj, reasonManagedControlPlaneNotFound, managedControlPlaneNotFoundMessage(req))
+			return ctrl.Result{RequeueAfter: providerConfigCopy.PollInterval()}, nil
+		}
 		res, err = r.createOrUpdate(ctx, obj, providerConfigCopy)
 	}
 	// return based on result/err
@@ -199,30 +217,23 @@ func (r *APIReconciler[T, PC]) updateStatus(ctx context.Context, newObj T, oldOb
 
 // delete eventually invokes the domain delete logic of a service provider and is the place to implement
 // common logic that should be abstracted away from a service provider developer like handling cluster access.
-func (r *APIReconciler[T, C]) delete(ctx context.Context, obj T, config C) (ctrl.Result, error) {
+// When mcpFound is false, MCP-side cleanup is skipped — the MCP cluster is unreachable so the SP cannot
+// (and need not) tear down its workload there. The AccessRequest cleanup and finalizer removal still run
+// so the SP CR can finish deleting instead of being stuck Terminating.
+func (r *APIReconciler[T, C]) delete(ctx context.Context, obj T, config C, mcpFound bool) (ctrl.Result, error) {
 	req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(obj)}
 	accessRequestsInDeletion, err := r.areAccessRequestsInDeletion(ctx, req)
 	if err != nil {
 		StatusProgressing(obj, reasonReconcileError, "failed to check access requests in deletion")
 		return reconcile.Result{}, err
 	}
-	if !accessRequestsInDeletion {
-		clusters, res, err := r.clusters(ctx, req)
-		if err != nil {
-			terminatingWithReason(obj, reasonReconcileError, "cluster cleanup error")
-			return ctrl.Result{}, err
+	if !accessRequestsInDeletion && mcpFound {
+		if res, done, err := r.runMCPCleanup(ctx, obj, config, req); done {
+			return res, err
 		}
-		if res.RequeueAfter > 0 {
-			terminatingWithReason(obj, "Reconciling", "cluster cleanup")
-			return res, nil
-		}
-		res, err = r.reconciler.Delete(ctx, obj, config, clusters)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-		if res.RequeueAfter > 0 {
-			return res, nil
-		}
+	} else if !mcpFound {
+		// MCP V2 is gone; no domain cleanup is possible. Mark Terminating so users see deletion is in progress.
+		StatusTerminating(obj)
 	}
 	// remove cluster access
 	res, err := r.clusterAccessProvider.ReconcileDelete(ctx, req)
@@ -241,6 +252,30 @@ func (r *APIReconciler[T, C]) delete(ctx context.Context, obj T, config C) (ctrl
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
+}
+
+// runMCPCleanup performs MCP-side cleanup: acquires cluster access and invokes the SP-domain Delete callback.
+// Returns done=true when the caller should return immediately with the given result/error (cluster setup
+// failed, requeue requested, or domain Delete completed). Returns done=false when cleanup finished and
+// the caller should proceed to AccessRequest teardown and finalizer removal.
+func (r *APIReconciler[T, C]) runMCPCleanup(ctx context.Context, obj T, config C, req ctrl.Request) (ctrl.Result, bool, error) {
+	clusters, res, err := r.clusters(ctx, req)
+	if err != nil {
+		terminatingWithReason(obj, reasonReconcileError, "cluster cleanup error")
+		return ctrl.Result{}, true, err
+	}
+	if res.RequeueAfter > 0 {
+		terminatingWithReason(obj, "Reconciling", "cluster cleanup")
+		return res, true, nil
+	}
+	res, err = r.reconciler.Delete(ctx, obj, config, clusters)
+	if err != nil {
+		return ctrl.Result{}, true, err
+	}
+	if res.RequeueAfter > 0 {
+		return res, true, nil
+	}
+	return ctrl.Result{}, false, nil
 }
 
 // createOrUpdate eventually invokes the domain createOrUpdate logic of a service provider and is the place to implement
@@ -263,6 +298,31 @@ func (r *APIReconciler[T, C]) createOrUpdate(ctx context.Context, obj T, config 
 		return res, nil
 	}
 	return r.reconciler.CreateOrUpdate(ctx, obj, config, clusters)
+}
+
+// managedControlPlaneNotFoundMessage returns a user-facing message for the ManagedControlPlaneNotFound
+// condition. It names the convention so users can self-resolve.
+func managedControlPlaneNotFoundMessage(req ctrl.Request) string {
+	return fmt.Sprintf(
+		"ManagedControlPlaneV2 %q not found on the onboarding cluster. "+
+			"A ServiceProviderAPI requires a matching ManagedControlPlaneV2 with the same name and namespace. "+
+			"Create the ManagedControlPlaneV2 first, then re-apply.",
+		req.Namespace+"/"+req.Name,
+	)
+}
+
+// managedControlPlaneExists reports whether the ManagedControlPlaneV2 implicitly referenced by the
+// reconciled object exists on the onboarding cluster. It returns false with a nil error when the MCP V2
+// is missing. The onboarding cluster's scheme must have core.openmcp.cloud/v2alpha1 registered.
+func (r *APIReconciler[T, C]) managedControlPlaneExists(ctx context.Context, req ctrl.Request) (bool, error) {
+	mcp := &mcpv2alpha1.ManagedControlPlaneV2{}
+	if err := r.onboardingCluster.Client().Get(ctx, req.NamespacedName, mcp); err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 // areAccessRequestsInDeletion determines if the access requests for a reconcile request are in deletion.

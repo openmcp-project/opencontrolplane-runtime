@@ -27,6 +27,7 @@ import (
 	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
 	"github.com/openmcp-project/openmcp-operator/api/common"
 	apiconst "github.com/openmcp-project/openmcp-operator/api/constants"
+	mcpv2alpha1 "github.com/openmcp-project/openmcp-operator/api/core/v2alpha1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -58,8 +59,12 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 		req                ctrl.Request
 		want               ctrl.Result
 		wantStatusPhase    string
+		wantReason         string
 		wantReconciliation bool
 		wantErr            bool
+		// noMCP, when true, omits the seeded ManagedControlPlaneV2 from the onboarding cluster
+		// to simulate the issue #9 scenario.
+		noMCP bool
 	}{
 		{
 			name: "CreateOrUpdate ok -> requeue with pc poll interval",
@@ -250,10 +255,76 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 			wantReconciliation: true,
 			wantErr:            true,
 		},
+		{
+			name: "ManagedControlPlaneV2 missing -> Progressing with ManagedControlPlaneNotFound condition",
+			apiObj: &fakeApiImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+				},
+			},
+			providerConfig: &fakeProviderConfigImpl{
+				FakePollInterval: time.Hour,
+			},
+			req: ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+				},
+			},
+			want: ctrl.Result{
+				RequeueAfter: time.Hour,
+			},
+			wantStatusPhase:    StatusPhaseProgressing,
+			wantReason:         reasonManagedControlPlaneNotFound,
+			wantReconciliation: false,
+			wantErr:            false,
+			noMCP:              true,
+		},
+		{
+			name: "Delete succeeds even when ManagedControlPlaneV2 is missing",
+			apiObj: &fakeApiImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+					DeletionTimestamp: &metav1.Time{
+						Time: time.Now(),
+					},
+					Finalizers: []string{"string"},
+				},
+			},
+			providerConfig: &fakeProviderConfigImpl{
+				FakePollInterval: time.Hour,
+			},
+			req: ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+				},
+			},
+			want: ctrl.Result{
+				RequeueAfter: time.Hour,
+			},
+			// SP-domain Delete is intentionally skipped (no MCP cluster to clean up on);
+			// AccessRequest cleanup and finalizer removal still run via clusterAccessProvider.ReconcileDelete.
+			wantStatusPhase:    StatusPhaseTerminating,
+			wantReconciliation: false,
+			wantErr:            false,
+			noMCP:              true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			onboardingCluster := createFakeCluster(t, "onboarding", tt.apiObj)
+			onboardingObjects := []client.Object{tt.apiObj}
+			if !tt.noMCP {
+				onboardingObjects = append(onboardingObjects, &mcpv2alpha1.ManagedControlPlaneV2{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      tt.req.Name,
+						Namespace: tt.req.Namespace,
+					},
+				})
+			}
+			onboardingCluster := createFakeCluster(t, "onboarding", onboardingObjects...)
 			platformCluster := createFakeCluster(t, "platform")
 			mockReconciler := &MockServiceProviderReconciler{
 				wantError: tt.wantErr,
@@ -315,6 +386,12 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 				assert.Nil(t, mockReconciler.config)
 				assert.Empty(t, mockReconciler.clusterContext.MCPAccessSecretKey)
 				assert.Empty(t, mockReconciler.clusterContext.WorkloadAccessSecretKey)
+				if tt.wantStatusPhase != "" {
+					assertStatusUpdate(t, onboardingCluster.Client(), tt.req, tt.wantStatusPhase)
+				}
+				if tt.wantReason != "" {
+					assertCondition(t, onboardingCluster.Client(), tt.req, tt.wantReason)
+				}
 				return
 			}
 
@@ -343,6 +420,22 @@ func assertStatusUpdate(t *testing.T, c client.Client, req ctrl.Request, wantSta
 	status, ok := obj.GetStatus().(common.Status)
 	require.True(t, ok)
 	assert.Equal(t, wantStatusPhase, status.Phase)
+}
+
+func assertCondition(t *testing.T, c client.Client, req ctrl.Request, wantReason string) {
+	t.Helper()
+	obj := &fakeApiImpl{}
+	obj.SetName(req.Name)
+	obj.SetNamespace(req.Namespace)
+	require.NoError(t, c.Get(context.Background(), client.ObjectKeyFromObject(obj), obj))
+	for _, cond := range *obj.GetConditions() {
+		if cond.Type == ServiceProviderConditionReady {
+			assert.Equal(t, wantReason, cond.Reason)
+			assert.Equal(t, metav1.ConditionFalse, cond.Status)
+			return
+		}
+	}
+	t.Fatalf("expected Ready condition not found, conditions: %+v", *obj.GetConditions())
 }
 
 var _ clusteraccess.Provider = FakeClusterAccessProvider{}
@@ -436,6 +529,7 @@ func createFakeCluster(t *testing.T, id string, clusterObjects ...client.Object)
 	_ = clientgoscheme.AddToScheme(scheme)
 	_ = apiextv1.AddToScheme(scheme)
 	_ = clustersv1alpha1.AddToScheme(scheme)
+	_ = mcpv2alpha1.AddToScheme(scheme)
 	scheme.AddKnownTypes(testGV, &fakeApiImpl{}, &fakeProviderConfigImpl{})
 
 	// init cluster with objects
