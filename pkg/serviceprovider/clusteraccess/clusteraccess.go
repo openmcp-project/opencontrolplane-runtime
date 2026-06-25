@@ -54,8 +54,8 @@ type simpleProviderAdapter struct {
 	simple Provider
 }
 
-// NewProviderAdapter wraps the legacy Provider as an AdvancedProvider.
-func NewProviderAdapter(provider Provider) AdvancedProvider {
+// NewSimpleProviderAdapter wraps the legacy Provider as an AdvancedProvider.
+func NewSimpleProviderAdapter(provider Provider) AdvancedProvider {
 	return &simpleProviderAdapter{simple: provider}
 }
 

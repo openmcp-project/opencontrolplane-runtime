@@ -106,7 +106,7 @@ func (b *APIReconcilerBuilder[T, C]) OnboardingCluster(c *clusters.Cluster) *API
 // ClusterAccessReconciler sets the letgacy cluster access reconciler.
 // additionalData provided through additionalDataGenerators is dropped since the legacy Provider does not support it.
 func (b *APIReconcilerBuilder[T, C]) ClusterAccessReconciler(provider clusteraccess.Provider) *APIReconcilerBuilder[T, C] {
-	b.apiReconciler.advancedClusterAccessProvider = clusteraccess.NewProviderAdapter(provider)
+	b.apiReconciler.advancedClusterAccessProvider = clusteraccess.NewSimpleProviderAdapter(provider)
 	return b
 }
 
