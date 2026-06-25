@@ -2,11 +2,19 @@ package clusteraccess
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/openmcp-project/controller-utils/pkg/clusters"
 	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+)
+
+const (
+	// MCPClusterID is the id used to identify the MCP cluster in the AdvancedProvider.
+	MCPClusterID = "mcp"
+	// WorkloadClusterID is the id used to identify the workload cluster in the AdvancedProvider.
+	WorkloadClusterID = "workload"
 )
 
 // Provider is a light weight version of the ClusterAccessReconciler
@@ -39,6 +47,52 @@ type Provider interface {
 	ReconcileDelete(ctx context.Context, request reconcile.Request) (reconcile.Result, error)
 }
 
+var _ AdvancedProvider = &simpleProviderAdapter{}
+
+// simpleProviderAdapter wraps the legacy Provider as an AdvancedProvider.
+type simpleProviderAdapter struct {
+	simple Provider
+}
+
+// NewProviderAdapter wraps the legacy Provider as an AdvancedProvider.
+func NewProviderAdapter(provider Provider) AdvancedProvider {
+	return &simpleProviderAdapter{simple: provider}
+}
+
+// Access implements [AdvancedProvider].
+func (a *simpleProviderAdapter) Access(ctx context.Context, request reconcile.Request, id string, _ ...any) (*clusters.Cluster, error) {
+	switch id {
+	case MCPClusterID:
+		return a.simple.MCPCluster(ctx, request)
+	case WorkloadClusterID:
+		return a.simple.WorkloadCluster(ctx, request)
+	default:
+		return nil, fmt.Errorf("unsupported cluster id: %s", id)
+	}
+}
+
+// AccessRequest implements [AdvancedProvider].
+func (a *simpleProviderAdapter) AccessRequest(ctx context.Context, request reconcile.Request, id string, _ ...any) (*clustersv1alpha1.AccessRequest, error) {
+	switch id {
+	case MCPClusterID:
+		return a.simple.MCPAccessRequest(ctx, request)
+	case WorkloadClusterID:
+		return a.simple.WorkloadAccessRequest(ctx, request)
+	default:
+		return nil, fmt.Errorf("unsupported cluster id: %s", id)
+	}
+}
+
+// Reconcile implements [AdvancedProvider].
+func (a *simpleProviderAdapter) Reconcile(ctx context.Context, request reconcile.Request, _ ...any) (reconcile.Result, error) {
+	return a.simple.Reconcile(ctx, request)
+}
+
+// ReconcileDelete implements [AdvancedProvider].
+func (a *simpleProviderAdapter) ReconcileDelete(ctx context.Context, request reconcile.Request, _ ...any) (reconcile.Result, error) {
+	return a.simple.ReconcileDelete(ctx, request)
+}
+
 // AdvancedProvider is a light weight version of advanced.ClusterAccessReconciler
 type AdvancedProvider interface {
 	// Access returns an internal Cluster object granting access to the cluster for the specified request with the specified id.
@@ -48,14 +102,6 @@ type AdvancedProvider interface {
 	// Will fail if the cluster is not registered or no AccessRequest is registered for the cluster, or if some other error occurs.
 	// The same additionalData must be passed into all methods of this ClusterAccessReconciler for the same request and id.
 	AccessRequest(ctx context.Context, request reconcile.Request, id string, additionalData ...any) (*clustersv1alpha1.AccessRequest, error)
-	// ClusterRequest fetches the ClusterRequest object for the cluster for the specified request with the specified id.
-	// Will fail if the cluster is not registered or no ClusterRequest is registered for the cluster, or if some other error occurs.
-	// The same additionalData must be passed into all methods of this ClusterAccessReconciler for the same request and id.
-	ClusterRequest(ctx context.Context, request reconcile.Request, id string, additionalData ...any) (*clustersv1alpha1.ClusterRequest, error)
-	// Cluster fetches the external Cluster object for the cluster for the specified request with the specified id.
-	// Will fail if the cluster is not registered or no Cluster can be determined, or if some other error occurs.
-	// The same additionalData must be passed into all methods of this ClusterAccessReconciler for the same request and id.
-	Cluster(ctx context.Context, request reconcile.Request, id string, additionalData ...any) (*clustersv1alpha1.Cluster, error)
 	// Reconcile creates the ClusterRequests and/or AccessRequests for the registered clusters.
 	// This function should be called during all reconciliations of the reconciled object.
 	// ctx is the context for the reconciliation.

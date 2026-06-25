@@ -450,16 +450,6 @@ func (f FakeAdvancedClusterAccessProvider) AccessRequest(_ context.Context, req 
 	return f.accessRequests[id], nil
 }
 
-// ClusterRequest implements [AdvancedClusterAccessProvider].
-func (f FakeAdvancedClusterAccessProvider) ClusterRequest(_ context.Context, _ reconcile.Request, _ string, _ ...any) (*clustersv1alpha1.ClusterRequest, error) {
-	panic("unimplemented")
-}
-
-// Cluster implements [AdvancedClusterAccessProvider].
-func (f FakeAdvancedClusterAccessProvider) Cluster(_ context.Context, _ reconcile.Request, _ string, _ ...any) (*clustersv1alpha1.Cluster, error) {
-	panic("unimplemented")
-}
-
 // Reconcile implements [AdvancedClusterAccessProvider].
 func (f FakeAdvancedClusterAccessProvider) Reconcile(_ context.Context, req reconcile.Request, _ ...any) (reconcile.Result, error) {
 	if req.Name == testObjectNameClusterAccessError {
@@ -690,11 +680,11 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 				PlatformCluster(platformCluster).
 				AdvancedClusterAccessReconciler(FakeAdvancedClusterAccessProvider{
 					clusters: map[string]*clusters.Cluster{
-						mcpID:      createFakeCluster(t, testMCPName),
-						workloadID: createFakeCluster(t, testWorkloadName),
+						clusteraccess.MCPClusterID:      createFakeCluster(t, testMCPName),
+						clusteraccess.WorkloadClusterID: createFakeCluster(t, testWorkloadName),
 					},
 					accessRequests: map[string]*clustersv1alpha1.AccessRequest{
-						mcpID: {
+						clusteraccess.MCPClusterID: {
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      testMCPName,
 								Namespace: testNamespaceName,
@@ -705,7 +695,7 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 								},
 							},
 						},
-						workloadID: {
+						clusteraccess.WorkloadClusterID: {
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      testWorkloadName,
 								Namespace: testNamespaceName,
