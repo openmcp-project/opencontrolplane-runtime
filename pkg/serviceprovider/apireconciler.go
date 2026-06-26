@@ -34,7 +34,7 @@ type APIReconciler[T API, C Config] struct {
 	// onboardingCluster represents the onboarding cluster of the v2 architecture
 	onboardingCluster *clusters.Cluster
 	// clusterAccessProvider reconciles access to MCP and workload clusters
-	advancedClusterAccessProvider clusteraccess.AdvancedProvider
+	clusterAccessProvider clusteraccess.AdvancedProvider
 	// reconciler reconciles the end-user facing onboarding API of a service provider
 	reconciler Reconciler[T, C]
 	// providerConfig represents the platform operator facing platform API of a service provider
@@ -67,8 +67,8 @@ func NewAPIReconcilerBuilder[T API, C Config]() *APIReconcilerBuilder[T, C] {
 // MustBuild validates every required field has been set and returns the APIReconciler.
 func (b *APIReconcilerBuilder[T, C]) MustBuild() *APIReconciler[T, C] {
 	// validate required fields
-	if b.apiReconciler.advancedClusterAccessProvider == nil {
-		panic("advanced cluster access provider is required")
+	if b.apiReconciler.clusterAccessProvider == nil {
+		panic("cluster access provider is required")
 	}
 	if b.apiReconciler.emptyObj == nil {
 		panic("empty object provider is required")
@@ -106,13 +106,13 @@ func (b *APIReconcilerBuilder[T, C]) OnboardingCluster(c *clusters.Cluster) *API
 // ClusterAccessReconciler sets the letgacy cluster access reconciler.
 // additionalData provided through additionalDataGenerators is dropped since the legacy Provider does not support it.
 func (b *APIReconcilerBuilder[T, C]) ClusterAccessReconciler(provider clusteraccess.Provider) *APIReconcilerBuilder[T, C] {
-	b.apiReconciler.advancedClusterAccessProvider = clusteraccess.NewSimpleProviderAdapter(provider)
+	b.apiReconciler.clusterAccessProvider = clusteraccess.NewSimpleProviderAdapter(provider)
 	return b
 }
 
 // AdvancedClusterAccessReconciler sets the advanced cluster access reconciler.
 func (b *APIReconcilerBuilder[T, C]) AdvancedClusterAccessReconciler(provider clusteraccess.AdvancedProvider) *APIReconcilerBuilder[T, C] {
-	b.apiReconciler.advancedClusterAccessProvider = provider
+	b.apiReconciler.clusterAccessProvider = provider
 	return b
 }
 
@@ -248,7 +248,7 @@ func (r *APIReconciler[T, C]) delete(ctx context.Context, obj T, config C, addit
 	}
 	// remove cluster access
 	var res ctrl.Result
-	res, err = r.advancedClusterAccessProvider.ReconcileDelete(ctx, req, additionalData...)
+	res, err = r.clusterAccessProvider.ReconcileDelete(ctx, req, additionalData...)
 	if err != nil {
 		terminatingWithReason(obj, reasonReconcileError, "failed cluster access reconcile delete")
 		return ctrl.Result{}, err
@@ -292,7 +292,7 @@ func (r *APIReconciler[T, C]) createOrUpdate(ctx context.Context, obj T, config 
 // It returns true if any access requests (mcp, workload) is deleted or has a deletion timestamp.
 // It is used to prevent renewing cluster access when deleting an ServiceProviderAPI object.
 func (r *APIReconciler[T, C]) areAccessRequestsInDeletion(ctx context.Context, req ctrl.Request, additionalData []any) (bool, error) {
-	accessRequest, err := r.advancedClusterAccessProvider.AccessRequest(ctx, req, clusteraccess.MCPClusterID, additionalData...)
+	accessRequest, err := r.clusterAccessProvider.AccessRequest(ctx, req, clusteraccess.MCPClusterID, additionalData...)
 	if apierrors.IsNotFound(err) || (accessRequest != nil && accessRequest.DeletionTimestamp != nil) {
 		return true, nil
 	}
@@ -300,7 +300,7 @@ func (r *APIReconciler[T, C]) areAccessRequestsInDeletion(ctx context.Context, r
 		return false, err
 	}
 	if r.withWorkloadCluster {
-		accessRequest, err = r.advancedClusterAccessProvider.AccessRequest(ctx, req, clusteraccess.WorkloadClusterID, additionalData...)
+		accessRequest, err = r.clusterAccessProvider.AccessRequest(ctx, req, clusteraccess.WorkloadClusterID, additionalData...)
 		if apierrors.IsNotFound(err) || (accessRequest != nil && accessRequest.DeletionTimestamp != nil) {
 			return true, nil
 		}
@@ -315,14 +315,14 @@ func (r *APIReconciler[T, C]) areAccessRequestsInDeletion(ctx context.Context, r
 // to delivery its service.
 func (r *APIReconciler[T, C]) clusters(ctx context.Context, req ctrl.Request, additionalData []any) (clusteraccess.ClusterContext, ctrl.Result, error) {
 	clusterContext := clusteraccess.ClusterContext{}
-	res, err := r.advancedClusterAccessProvider.Reconcile(ctx, req, additionalData...)
+	res, err := r.clusterAccessProvider.Reconcile(ctx, req, additionalData...)
 	if err != nil {
 		return clusterContext, ctrl.Result{}, err
 	}
 	if res.RequeueAfter > 0 {
 		return clusterContext, res, nil
 	}
-	mcpCluster, err := r.advancedClusterAccessProvider.Access(ctx, req, clusteraccess.MCPClusterID, additionalData...)
+	mcpCluster, err := r.clusterAccessProvider.Access(ctx, req, clusteraccess.MCPClusterID, additionalData...)
 	if err != nil {
 		return clusterContext, ctrl.Result{}, err
 	}
@@ -330,13 +330,13 @@ func (r *APIReconciler[T, C]) clusters(ctx context.Context, req ctrl.Request, ad
 		return clusterContext, res, errors.New("mcp access missing")
 	}
 	clusterContext.MCPCluster = mcpCluster
-	ar, err := r.advancedClusterAccessProvider.AccessRequest(ctx, req, clusteraccess.MCPClusterID, additionalData...)
+	ar, err := r.clusterAccessProvider.AccessRequest(ctx, req, clusteraccess.MCPClusterID, additionalData...)
 	if err != nil {
 		return clusterContext, ctrl.Result{}, err
 	}
 	clusterContext.MCPAccessSecretKey = retrieveSecretKey(ar)
 	if r.withWorkloadCluster {
-		workloadCluster, err := r.advancedClusterAccessProvider.Access(ctx, req, clusteraccess.WorkloadClusterID, additionalData...)
+		workloadCluster, err := r.clusterAccessProvider.Access(ctx, req, clusteraccess.WorkloadClusterID, additionalData...)
 		if err != nil {
 			return clusterContext, ctrl.Result{}, err
 		}
@@ -344,7 +344,7 @@ func (r *APIReconciler[T, C]) clusters(ctx context.Context, req ctrl.Request, ad
 			return clusterContext, res, errors.New("workload cluster access missing")
 		}
 		clusterContext.WorkloadCluster = workloadCluster
-		ar, err := r.advancedClusterAccessProvider.AccessRequest(ctx, req, clusteraccess.WorkloadClusterID, additionalData...)
+		ar, err := r.clusterAccessProvider.AccessRequest(ctx, req, clusteraccess.WorkloadClusterID, additionalData...)
 		if err != nil {
 			return clusterContext, ctrl.Result{}, err
 		}
