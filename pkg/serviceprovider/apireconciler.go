@@ -34,7 +34,7 @@ type APIReconciler[T API, C Config] struct {
 	// onboardingCluster represents the onboarding cluster of the v2 architecture
 	onboardingCluster *clusters.Cluster
 	// clusterAccessProvider reconciles access to MCP and workload clusters
-	clusterAccessProvider clusteraccess.Provider
+	clusterAccessProvider clusteraccess.AdvancedProvider
 	// reconciler reconciles the end-user facing onboarding API of a service provider
 	reconciler Reconciler[T, C]
 	// providerConfig represents the platform operator facing platform API of a service provider
@@ -47,6 +47,9 @@ type APIReconciler[T API, C Config] struct {
 	configMapNamespace string
 	// emptyObj creates an empty object of the api type
 	emptyObj func() T
+	// additionalDataGenerators is an optional list of functions which are called during reconciliation.
+	// Their outputs are collected and forwarded as additionalData to only the advanced cluster access reconciler.
+	additionalDataGenerators []func(ctx context.Context, obj T, config C) (any, error)
 }
 
 // APIReconcilerBuilder enables building valid APIReconcilers.
@@ -100,8 +103,15 @@ func (b *APIReconcilerBuilder[T, C]) OnboardingCluster(c *clusters.Cluster) *API
 	return b
 }
 
-// ClusterAccessReconciler sets the cluster access reconciler.
+// ClusterAccessReconciler sets the letgacy cluster access reconciler.
+// additionalData provided through additionalDataGenerators is dropped since the legacy Provider does not support it.
 func (b *APIReconcilerBuilder[T, C]) ClusterAccessReconciler(provider clusteraccess.Provider) *APIReconcilerBuilder[T, C] {
+	b.apiReconciler.clusterAccessProvider = clusteraccess.NewSimpleProviderAdapter(provider)
+	return b
+}
+
+// AdvancedClusterAccessReconciler sets the advanced cluster access reconciler.
+func (b *APIReconcilerBuilder[T, C]) AdvancedClusterAccessReconciler(provider clusteraccess.AdvancedProvider) *APIReconcilerBuilder[T, C] {
 	b.apiReconciler.clusterAccessProvider = provider
 	return b
 }
@@ -129,6 +139,13 @@ func (b *APIReconcilerBuilder[T, C]) SecretNamespace(ns string) *APIReconcilerBu
 // Only used if the ServiceProviderReconciler also implements ConfigMapWatcher.
 func (b *APIReconcilerBuilder[T, C]) ConfigMapNamespace(ns string) *APIReconcilerBuilder[T, C] {
 	b.apiReconciler.configMapNamespace = ns
+	return b
+}
+
+// AdditionalDataGenerators registers functions that are called during reconciliation.
+// Their output is collected and passed as additionalData to the advanced cluster access reconciler methods.
+func (b *APIReconcilerBuilder[T, C]) AdditionalDataGenerators(generators ...func(ctx context.Context, obj T, config C) (any, error)) *APIReconcilerBuilder[T, C] {
+	b.apiReconciler.additionalDataGenerators = append(b.apiReconciler.additionalDataGenerators, generators...)
 	return b
 }
 
@@ -165,14 +182,19 @@ func (r *APIReconciler[T, C]) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, errors.New("provider config missing")
 	}
 	providerConfigCopy := (*providerConfig).DeepCopyObject().(C)
+	// generate additional data
+	additionalData, err := r.generateAdditionalData(ctx, obj, providerConfigCopy)
+	if err != nil {
+		StatusProgressing(obj, reasonReconcileError, "failed to generate additional data")
+		return ctrl.Result{}, err
+	}
 	// core crud
 	deleted := !obj.GetDeletionTimestamp().IsZero()
 	var res ctrl.Result
-	var err error
 	if deleted {
-		res, err = r.delete(ctx, obj, providerConfigCopy)
+		res, err = r.delete(ctx, obj, providerConfigCopy, additionalData)
 	} else {
-		res, err = r.createOrUpdate(ctx, obj, providerConfigCopy)
+		res, err = r.createOrUpdate(ctx, obj, providerConfigCopy, additionalData)
 	}
 	// return based on result/err
 	if err != nil {
@@ -199,15 +221,15 @@ func (r *APIReconciler[T, PC]) updateStatus(ctx context.Context, newObj T, oldOb
 
 // delete eventually invokes the domain delete logic of a service provider and is the place to implement
 // common logic that should be abstracted away from a service provider developer like handling cluster access.
-func (r *APIReconciler[T, C]) delete(ctx context.Context, obj T, config C) (ctrl.Result, error) {
+func (r *APIReconciler[T, C]) delete(ctx context.Context, obj T, config C, additionalData []any) (ctrl.Result, error) {
 	req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(obj)}
-	accessRequestsInDeletion, err := r.areAccessRequestsInDeletion(ctx, req)
+	accessRequestsInDeletion, err := r.areAccessRequestsInDeletion(ctx, req, additionalData)
 	if err != nil {
 		StatusProgressing(obj, reasonReconcileError, "failed to check access requests in deletion")
 		return reconcile.Result{}, err
 	}
 	if !accessRequestsInDeletion {
-		clusters, res, err := r.clusters(ctx, req)
+		clusterContext, res, err := r.clusters(ctx, req, additionalData)
 		if err != nil {
 			terminatingWithReason(obj, reasonReconcileError, "cluster cleanup error")
 			return ctrl.Result{}, err
@@ -216,7 +238,7 @@ func (r *APIReconciler[T, C]) delete(ctx context.Context, obj T, config C) (ctrl
 			terminatingWithReason(obj, "Reconciling", "cluster cleanup")
 			return res, nil
 		}
-		res, err = r.reconciler.Delete(ctx, obj, config, clusters)
+		res, err = r.reconciler.Delete(ctx, obj, config, clusterContext)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -225,7 +247,8 @@ func (r *APIReconciler[T, C]) delete(ctx context.Context, obj T, config C) (ctrl
 		}
 	}
 	// remove cluster access
-	res, err := r.clusterAccessProvider.ReconcileDelete(ctx, req)
+	var res ctrl.Result
+	res, err = r.clusterAccessProvider.ReconcileDelete(ctx, req, additionalData...)
 	if err != nil {
 		terminatingWithReason(obj, reasonReconcileError, "failed cluster access reconcile delete")
 		return ctrl.Result{}, err
@@ -245,7 +268,7 @@ func (r *APIReconciler[T, C]) delete(ctx context.Context, obj T, config C) (ctrl
 
 // createOrUpdate eventually invokes the domain createOrUpdate logic of a service provider and is the place to implement
 // common logic that should be abstracted away from a service provider developer like handling cluster access.
-func (r *APIReconciler[T, C]) createOrUpdate(ctx context.Context, obj T, config C) (ctrl.Result, error) {
+func (r *APIReconciler[T, C]) createOrUpdate(ctx context.Context, obj T, config C, additionalData []any) (ctrl.Result, error) {
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.onboardingCluster.Client(), obj, func() error {
 		controllerutil.AddFinalizer(obj, obj.Finalizer())
 		return nil
@@ -254,7 +277,7 @@ func (r *APIReconciler[T, C]) createOrUpdate(ctx context.Context, obj T, config 
 		return ctrl.Result{}, err
 	}
 	req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(obj)}
-	clusters, res, err := r.clusters(ctx, req)
+	clusterContext, res, err := r.clusters(ctx, req, additionalData)
 	if err != nil {
 		StatusProgressing(obj, reasonReconcileError, "cluster setup error")
 		return ctrl.Result{}, err
@@ -262,14 +285,14 @@ func (r *APIReconciler[T, C]) createOrUpdate(ctx context.Context, obj T, config 
 	if res.RequeueAfter > 0 {
 		return res, nil
 	}
-	return r.reconciler.CreateOrUpdate(ctx, obj, config, clusters)
+	return r.reconciler.CreateOrUpdate(ctx, obj, config, clusterContext)
 }
 
 // areAccessRequestsInDeletion determines if the access requests for a reconcile request are in deletion.
 // It returns true if any access requests (mcp, workload) is deleted or has a deletion timestamp.
 // It is used to prevent renewing cluster access when deleting an ServiceProviderAPI object.
-func (r *APIReconciler[T, C]) areAccessRequestsInDeletion(ctx context.Context, req ctrl.Request) (bool, error) {
-	accessRequest, err := r.clusterAccessProvider.MCPAccessRequest(ctx, req)
+func (r *APIReconciler[T, C]) areAccessRequestsInDeletion(ctx context.Context, req ctrl.Request, additionalData []any) (bool, error) {
+	accessRequest, err := r.clusterAccessProvider.AccessRequest(ctx, req, clusteraccess.MCPClusterID, additionalData...)
 	if apierrors.IsNotFound(err) || (accessRequest != nil && accessRequest.DeletionTimestamp != nil) {
 		return true, nil
 	}
@@ -277,7 +300,7 @@ func (r *APIReconciler[T, C]) areAccessRequestsInDeletion(ctx context.Context, r
 		return false, err
 	}
 	if r.withWorkloadCluster {
-		accessRequest, err = r.clusterAccessProvider.WorkloadAccessRequest(ctx, req)
+		accessRequest, err = r.clusterAccessProvider.AccessRequest(ctx, req, clusteraccess.WorkloadClusterID, additionalData...)
 		if apierrors.IsNotFound(err) || (accessRequest != nil && accessRequest.DeletionTimestamp != nil) {
 			return true, nil
 		}
@@ -290,44 +313,44 @@ func (r *APIReconciler[T, C]) areAccessRequestsInDeletion(ctx context.Context, r
 
 // clusters returns any request scoped cluster that a servicer provider developer might want to access in order
 // to delivery its service.
-func (r *APIReconciler[T, C]) clusters(ctx context.Context, req ctrl.Request) (clusteraccess.ClusterContext, ctrl.Result, error) {
-	clusters := clusteraccess.ClusterContext{}
-	res, err := r.clusterAccessProvider.Reconcile(ctx, req)
+func (r *APIReconciler[T, C]) clusters(ctx context.Context, req ctrl.Request, additionalData []any) (clusteraccess.ClusterContext, ctrl.Result, error) {
+	clusterContext := clusteraccess.ClusterContext{}
+	res, err := r.clusterAccessProvider.Reconcile(ctx, req, additionalData...)
 	if err != nil {
-		return clusters, ctrl.Result{}, err
+		return clusterContext, ctrl.Result{}, err
 	}
 	if res.RequeueAfter > 0 {
-		return clusters, res, nil
+		return clusterContext, res, nil
 	}
-	mcpCluster, err := r.clusterAccessProvider.MCPCluster(ctx, req)
+	mcpCluster, err := r.clusterAccessProvider.Access(ctx, req, clusteraccess.MCPClusterID, additionalData...)
 	if err != nil {
-		return clusters, ctrl.Result{}, err
+		return clusterContext, ctrl.Result{}, err
 	}
 	if mcpCluster == nil {
-		return clusters, res, errors.New("mcp access missing")
+		return clusterContext, res, errors.New("mcp access missing")
 	}
-	clusters.MCPCluster = mcpCluster
-	ar, err := r.clusterAccessProvider.MCPAccessRequest(ctx, req)
+	clusterContext.MCPCluster = mcpCluster
+	ar, err := r.clusterAccessProvider.AccessRequest(ctx, req, clusteraccess.MCPClusterID, additionalData...)
 	if err != nil {
-		return clusters, ctrl.Result{}, err
+		return clusterContext, ctrl.Result{}, err
 	}
-	clusters.MCPAccessSecretKey = retrieveSecretKey(ar)
+	clusterContext.MCPAccessSecretKey = retrieveSecretKey(ar)
 	if r.withWorkloadCluster {
-		workloadCluster, err := r.clusterAccessProvider.WorkloadCluster(ctx, req)
+		workloadCluster, err := r.clusterAccessProvider.Access(ctx, req, clusteraccess.WorkloadClusterID, additionalData...)
 		if err != nil {
-			return clusters, ctrl.Result{}, err
+			return clusterContext, ctrl.Result{}, err
 		}
 		if workloadCluster == nil {
-			return clusters, res, errors.New("workload cluster access missing")
+			return clusterContext, res, errors.New("workload cluster access missing")
 		}
-		clusters.WorkloadCluster = workloadCluster
-		ar, err := r.clusterAccessProvider.WorkloadAccessRequest(ctx, req)
+		clusterContext.WorkloadCluster = workloadCluster
+		ar, err := r.clusterAccessProvider.AccessRequest(ctx, req, clusteraccess.WorkloadClusterID, additionalData...)
 		if err != nil {
-			return clusters, ctrl.Result{}, err
+			return clusterContext, ctrl.Result{}, err
 		}
-		clusters.WorkloadAccessSecretKey = retrieveSecretKey(ar)
+		clusterContext.WorkloadAccessSecretKey = retrieveSecretKey(ar)
 	}
-	return clusters, res, nil
+	return clusterContext, res, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -448,4 +471,20 @@ func retrieveSecretKey(ar *clustersv1alpha1.AccessRequest) client.ObjectKey {
 		Namespace: ar.Namespace,
 		Name:      ar.Status.SecretRef.Name,
 	}
+}
+
+// generateAdditionalData calls all registered generators and returns their outputs as a slice.
+func (r *APIReconciler[T, C]) generateAdditionalData(ctx context.Context, obj T, config C) ([]any, error) {
+	if len(r.additionalDataGenerators) == 0 {
+		return nil, nil
+	}
+	data := make([]any, 0, len(r.additionalDataGenerators))
+	for _, gen := range r.additionalDataGenerators {
+		d, err := gen(ctx, obj, config)
+		if err != nil {
+			return nil, err
+		}
+		data = append(data, d)
+	}
+	return data, nil
 }

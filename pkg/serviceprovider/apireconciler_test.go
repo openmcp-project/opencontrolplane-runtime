@@ -47,6 +47,8 @@ const (
 
 	testWorkloadName       = "workload-name"
 	testWorkloadKubeconfig = "workload-kubeconfig"
+
+	testFinalizer = "string"
 )
 
 func TestAPIReconciler_Reconcile(t *testing.T) {
@@ -116,7 +118,7 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 					DeletionTimestamp: &metav1.Time{
 						Time: time.Now(),
 					},
-					Finalizers: []string{"string"},
+					Finalizers: []string{testFinalizer},
 				},
 			},
 			req: ctrl.Request{
@@ -144,7 +146,7 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 					DeletionTimestamp: &metav1.Time{
 						Time: time.Now(),
 					},
-					Finalizers: []string{"string"},
+					Finalizers: []string{testFinalizer},
 				},
 			},
 			req: ctrl.Request{
@@ -170,7 +172,7 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 					DeletionTimestamp: &metav1.Time{
 						Time: time.Now(),
 					},
-					Finalizers: []string{"string"},
+					Finalizers: []string{testFinalizer},
 				},
 			},
 			req: ctrl.Request{
@@ -411,7 +413,7 @@ func (f FakeClusterAccessProvider) Reconcile(ctx context.Context, request reconc
 
 // ReconcileDelete implements [ClusterAccessProvider].
 func (f FakeClusterAccessProvider) ReconcileDelete(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
-	// Fake waiting for cluster acccess deletion.
+	// Fake waiting for cluster access deletion.
 	// This prevents finalizer removal in the delete case and the fake client from losing the not yet persisted terminating state.
 	return reconcile.Result{
 		RequeueAfter: time.Hour,
@@ -426,6 +428,330 @@ func (f FakeClusterAccessProvider) WorkloadAccessRequest(ctx context.Context, re
 // WorkloadCluster implements [ClusterAccessProvider].
 func (f FakeClusterAccessProvider) WorkloadCluster(ctx context.Context, request reconcile.Request) (*clusters.Cluster, error) {
 	return f.Workload, nil
+}
+
+var _ clusteraccess.AdvancedProvider = FakeAdvancedClusterAccessProvider{}
+
+type FakeAdvancedClusterAccessProvider struct {
+	clusters       map[string]*clusters.Cluster
+	accessRequests map[string]*clustersv1alpha1.AccessRequest
+}
+
+// Access implements [AdvancedClusterAccessProvider].
+func (f FakeAdvancedClusterAccessProvider) Access(_ context.Context, _ reconcile.Request, id string, _ ...any) (*clusters.Cluster, error) {
+	return f.clusters[id], nil
+}
+
+// AccessRequest implements [AdvancedClusterAccessProvider].
+func (f FakeAdvancedClusterAccessProvider) AccessRequest(_ context.Context, req reconcile.Request, id string, _ ...any) (*clustersv1alpha1.AccessRequest, error) {
+	if req.Name == testObjectNameClusterAccessError {
+		return nil, errors.New("cluster access reconcile failed")
+	}
+	return f.accessRequests[id], nil
+}
+
+// Reconcile implements [AdvancedClusterAccessProvider].
+func (f FakeAdvancedClusterAccessProvider) Reconcile(_ context.Context, req reconcile.Request, _ ...any) (reconcile.Result, error) {
+	if req.Name == testObjectNameClusterAccessError {
+		return reconcile.Result{}, errors.New("cluster access reconcile failed")
+	}
+	return reconcile.Result{}, nil
+}
+
+// ReconcileDelete implements [AdvancedClusterAccessProvider].
+func (f FakeAdvancedClusterAccessProvider) ReconcileDelete(_ context.Context, _ reconcile.Request, _ ...any) (reconcile.Result, error) {
+	// Fake waiting for cluster access deletion.
+	// This prevents finalizer removal in the delete case and the fake client from losing the not yet persisted terminating state.
+	return reconcile.Result{RequeueAfter: time.Hour}, nil
+}
+
+func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
+	tests := []struct {
+		name string // description of this test case
+		// Named input parameters for target function.
+		apiObj             API
+		providerConfig     *fakeProviderConfigImpl
+		req                ctrl.Request
+		want               ctrl.Result
+		wantStatusPhase    string
+		wantReconciliation bool
+		wantErr            bool
+	}{
+		{
+			name: "CreateOrUpdate ok -> requeue with pc poll interval",
+			apiObj: &fakeApiImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+				},
+			},
+			req: ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+				},
+			},
+			providerConfig: &fakeProviderConfigImpl{
+				FakePollInterval: time.Hour,
+			},
+			want: ctrl.Result{
+				RequeueAfter: time.Hour,
+			},
+			wantStatusPhase:    StatusPhaseReady,
+			wantReconciliation: true,
+			wantErr:            false,
+		},
+		{
+			name: "CreateOrUpdate error -> error and status update",
+			apiObj: &fakeApiImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+				},
+			},
+			req: ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+				},
+			},
+			providerConfig: &fakeProviderConfigImpl{
+				FakePollInterval: time.Hour,
+			},
+			want:               ctrl.Result{},
+			wantStatusPhase:    StatusPhaseProgressing,
+			wantReconciliation: true,
+			wantErr:            true,
+		},
+		{
+			name: "Delete ok -> requeue with pc poll interval",
+			apiObj: &fakeApiImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+					DeletionTimestamp: &metav1.Time{
+						Time: time.Now(),
+					},
+					Finalizers: []string{testFinalizer},
+				},
+			},
+			req: ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+				},
+			},
+			providerConfig: &fakeProviderConfigImpl{
+				FakePollInterval: time.Hour,
+			},
+			want: ctrl.Result{
+				RequeueAfter: time.Hour,
+			},
+			wantStatusPhase:    StatusPhaseTerminating,
+			wantReconciliation: true,
+			wantErr:            false,
+		},
+		{
+			name: "Delete error -> error and status update",
+			apiObj: &fakeApiImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+					DeletionTimestamp: &metav1.Time{
+						Time: time.Now(),
+					},
+					Finalizers: []string{testFinalizer},
+				},
+			},
+			req: ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+				},
+			},
+			providerConfig: &fakeProviderConfigImpl{
+				FakePollInterval: time.Hour,
+			},
+			want:               ctrl.Result{},
+			wantStatusPhase:    StatusPhaseTerminating,
+			wantReconciliation: true,
+			wantErr:            true,
+		},
+		{
+			name: "api obj not found -> do not requeue",
+			apiObj: &fakeApiImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+					DeletionTimestamp: &metav1.Time{
+						Time: time.Now(),
+					},
+					Finalizers: []string{testFinalizer},
+				},
+			},
+			req: ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      testObjectNameNotFound,
+					Namespace: testNamespaceName,
+				},
+			},
+			providerConfig: &fakeProviderConfigImpl{
+				FakePollInterval: time.Hour,
+			},
+			want:               ctrl.Result{},
+			wantStatusPhase:    "",
+			wantReconciliation: false,
+			wantErr:            false,
+		},
+		{
+			name: "provider config not found -> error",
+			apiObj: &fakeApiImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+				},
+			},
+			req: ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+				},
+			},
+			want:               ctrl.Result{},
+			wantStatusPhase:    StatusPhaseProgressing,
+			wantReconciliation: false,
+			wantErr:            true,
+		},
+		{
+			name: "Operation annotation ignore -> no reconciliation, no requeue",
+			apiObj: &fakeApiImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+					Annotations: map[string]string{
+						apiconst.OperationAnnotation: apiconst.OperationAnnotationValueIgnore,
+					},
+				},
+			},
+			req: ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+				},
+			},
+			providerConfig:     &fakeProviderConfigImpl{},
+			want:               ctrl.Result{},
+			wantReconciliation: false,
+			wantErr:            false,
+		},
+		{
+			name: "cluster access reconciler fails -> error and status update",
+			apiObj: &fakeApiImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testObjectNameClusterAccessError,
+					Namespace: testNamespaceName,
+				},
+			},
+			providerConfig: &fakeProviderConfigImpl{
+				FakePollInterval: time.Hour,
+			},
+			req: ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      testObjectNameClusterAccessError,
+					Namespace: testNamespaceName,
+				},
+			},
+			want:               ctrl.Result{},
+			wantStatusPhase:    StatusPhaseProgressing,
+			wantReconciliation: true,
+			wantErr:            true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			onboardingCluster := createFakeCluster(t, "onboarding", tt.apiObj)
+			platformCluster := createFakeCluster(t, "platform")
+			mockReconciler := &MockServiceProviderReconciler{
+				wantError: tt.wantErr,
+			}
+			builder := NewAPIReconcilerBuilder[*fakeApiImpl, *fakeProviderConfigImpl]().
+				EmptyObjectProvider(func() *fakeApiImpl { return &fakeApiImpl{} }).
+				OnboardingCluster(onboardingCluster).
+				PlatformCluster(platformCluster).
+				AdvancedClusterAccessReconciler(FakeAdvancedClusterAccessProvider{
+					clusters: map[string]*clusters.Cluster{
+						clusteraccess.MCPClusterID:      createFakeCluster(t, testMCPName),
+						clusteraccess.WorkloadClusterID: createFakeCluster(t, testWorkloadName),
+					},
+					accessRequests: map[string]*clustersv1alpha1.AccessRequest{
+						clusteraccess.MCPClusterID: {
+							ObjectMeta: metav1.ObjectMeta{
+								Name:      testMCPName,
+								Namespace: testNamespaceName,
+							},
+							Status: clustersv1alpha1.AccessRequestStatus{
+								SecretRef: &common.LocalObjectReference{
+									Name: testMCPKubeconfig,
+								},
+							},
+						},
+						clusteraccess.WorkloadClusterID: {
+							ObjectMeta: metav1.ObjectMeta{
+								Name:      testWorkloadName,
+								Namespace: testNamespaceName,
+							},
+							Status: clustersv1alpha1.AccessRequestStatus{
+								SecretRef: &common.LocalObjectReference{
+									Name: testWorkloadKubeconfig,
+								},
+							},
+						},
+					},
+				}).
+				Reconciler(mockReconciler).
+				WorkloadCluster(true)
+			if tt.providerConfig != nil {
+				builder.ProviderConfig(tt.providerConfig)
+			}
+			r := builder.MustBuild()
+			got, gotErr := r.Reconcile(context.Background(), tt.req)
+			if gotErr != nil {
+				if !tt.wantErr {
+					t.Errorf("Reconcile() failed: %v", gotErr)
+				}
+				assertStatusUpdate(t, onboardingCluster.Client(), tt.req, tt.wantStatusPhase)
+				return
+			}
+			if tt.wantErr {
+				t.Fatal("Reconcile() succeeded unexpectedly")
+			}
+			assert.Equal(t, tt.want, got)
+			assert.Equal(t, tt.wantReconciliation, mockReconciler.createOrUpdateCalled || mockReconciler.deleteCalled)
+
+			if !tt.wantReconciliation {
+				assert.False(t, mockReconciler.createOrUpdateCalled)
+				assert.False(t, mockReconciler.deleteCalled)
+				assert.Nil(t, mockReconciler.apiObj)
+				assert.Nil(t, mockReconciler.config)
+				assert.Empty(t, mockReconciler.clusterContext.MCPAccessSecretKey)
+				assert.Empty(t, mockReconciler.clusterContext.WorkloadAccessSecretKey)
+				return
+			}
+
+			// assert that the generic reconciler delegates objects to the target reconciler as expected
+			assert.Equal(t, client.ObjectKeyFromObject(tt.apiObj), client.ObjectKeyFromObject(mockReconciler.apiObj))
+			assert.Equal(t, client.ObjectKeyFromObject(tt.providerConfig), client.ObjectKeyFromObject(mockReconciler.config))
+			assert.Equal(t, client.ObjectKey{
+				Namespace: tt.req.Namespace,
+				Name:      testMCPKubeconfig,
+			}, mockReconciler.clusterContext.MCPAccessSecretKey)
+			assert.Equal(t, client.ObjectKey{
+				Namespace: tt.req.Namespace,
+				Name:      testWorkloadKubeconfig,
+			}, mockReconciler.clusterContext.WorkloadAccessSecretKey)
+			assertStatusUpdate(t, onboardingCluster.Client(), tt.req, tt.wantStatusPhase)
+		})
+	}
 }
 
 var testGV = schema.GroupVersion{Group: "openmcp.test", Version: "v1"}
