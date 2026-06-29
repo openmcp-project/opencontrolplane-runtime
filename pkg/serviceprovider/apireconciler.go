@@ -178,7 +178,6 @@ func (r *APIReconciler[T, C]) Reconcile(ctx context.Context, req ctrl.Request) (
 	}()
 	providerConfig := r.emptyConfig()
 	providerConfig.SetName(r.providerName)
-	providerConfig.SetNamespace("openmcp-system")
 	if err := r.platformCluster.Client().Get(ctx, client.ObjectKeyFromObject(providerConfig), providerConfig); err != nil {
 		if apierrors.IsNotFound(err) {
 			StatusProgressing(obj, reasonReconcileError, "No ProviderConfig found")
@@ -360,6 +359,7 @@ func (r *APIReconciler[T, C]) clusters(ctx context.Context, req ctrl.Request, ad
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *APIReconciler[T, C]) SetupWithManager(mgr ctrl.Manager, name string) error {
+	r.providerName = name
 	controller := ctrl.NewControllerManagedBy(mgr).For(r.emptyObj()).
 		// add provider config watch
 		WatchesRawSource(source.Kind(
