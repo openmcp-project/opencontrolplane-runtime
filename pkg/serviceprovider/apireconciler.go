@@ -73,6 +73,9 @@ func (b *APIReconcilerBuilder[T, C]) MustBuild() *APIReconciler[T, C] {
 	if b.apiReconciler.emptyObj == nil {
 		panic("empty object provider is required")
 	}
+	if b.apiReconciler.emptyConfig == nil {
+		panic("empty config provider is required")
+	}
 	if b.apiReconciler.onboardingCluster == nil {
 		panic("onboarding cluster is required")
 	}
