@@ -1146,6 +1146,7 @@ func TestMapConfigMapToRequests(t *testing.T) {
 				emptyObj:          func() *fakeApiImpl { return &fakeApiImpl{} },
 				emptyConfig:       func() *fakeProviderConfigImpl { return &fakeProviderConfigImpl{} },
 				onboardingCluster: onboardingCluster,
+				platformCluster:   platformCluster,
 				reconciler:        mockCW,
 			}
 			if tt.providerConfig != nil {
