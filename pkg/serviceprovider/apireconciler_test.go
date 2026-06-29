@@ -78,6 +78,9 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 				},
 			},
 			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test",
+				},
 				FakePollInterval: time.Hour,
 			},
 			want: ctrl.Result{
@@ -102,6 +105,9 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 				},
 			},
 			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test",
+				},
 				FakePollInterval: time.Hour,
 			},
 			want:               ctrl.Result{},
@@ -128,6 +134,9 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 				},
 			},
 			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test",
+				},
 				FakePollInterval: time.Hour,
 			},
 			want: ctrl.Result{
@@ -156,6 +165,9 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 				},
 			},
 			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test",
+				},
 				FakePollInterval: time.Hour,
 			},
 			want:               ctrl.Result{},
@@ -182,6 +194,9 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 				},
 			},
 			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test",
+				},
 				FakePollInterval: time.Hour,
 			},
 			want:               ctrl.Result{},
@@ -190,7 +205,7 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 			wantErr:            false,
 		},
 		{
-			name: "provider config not found -> error",
+			name: "provider config not found -> no error since there is no chance of self heal",
 			apiObj: &fakeApiImpl{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      testObjectName,
@@ -206,7 +221,7 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 			want:               ctrl.Result{},
 			wantStatusPhase:    StatusPhaseProgressing,
 			wantReconciliation: false,
-			wantErr:            true,
+			wantErr:            false,
 		},
 		{
 			name: "Operation annotation ignore -> no reconciliation, no requeue",
@@ -225,7 +240,11 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 					Namespace: testNamespaceName,
 				},
 			},
-			providerConfig:     &fakeProviderConfigImpl{},
+			providerConfig:     &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test",
+				},
+			},
 			want:               ctrl.Result{},
 			wantReconciliation: false,
 			wantErr:            false,
@@ -239,6 +258,9 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 				},
 			},
 			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test",
+				},
 				FakePollInterval: time.Hour,
 			},
 			req: ctrl.Request{
@@ -294,6 +316,10 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 				Reconciler(mockReconciler).
 				WorkloadCluster(true)
 			r := builder.MustBuild()
+			if tt.providerConfig != nil {
+				r.providerName = tt.providerConfig.Name
+				require.NoError(t, platformCluster.Client().Create(context.TODO(), tt.providerConfig))
+			}
 			got, gotErr := r.Reconcile(context.Background(), tt.req)
 			if gotErr != nil {
 				if !tt.wantErr {
@@ -490,6 +516,9 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 				},
 			},
 			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test",
+				},
 				FakePollInterval: time.Hour,
 			},
 			want: ctrl.Result{
@@ -514,6 +543,9 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 				},
 			},
 			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test",
+				},
 				FakePollInterval: time.Hour,
 			},
 			want:               ctrl.Result{},
@@ -540,6 +572,9 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 				},
 			},
 			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test",
+				},
 				FakePollInterval: time.Hour,
 			},
 			want: ctrl.Result{
@@ -568,6 +603,9 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 				},
 			},
 			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test",
+				},
 				FakePollInterval: time.Hour,
 			},
 			want:               ctrl.Result{},
@@ -594,6 +632,9 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 				},
 			},
 			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test",
+				},
 				FakePollInterval: time.Hour,
 			},
 			want:               ctrl.Result{},
@@ -602,7 +643,7 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 			wantErr:            false,
 		},
 		{
-			name: "provider config not found -> error",
+			name: "provider config not found -> no error since there is no chance of self heal",
 			apiObj: &fakeApiImpl{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      testObjectName,
@@ -618,7 +659,7 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 			want:               ctrl.Result{},
 			wantStatusPhase:    StatusPhaseProgressing,
 			wantReconciliation: false,
-			wantErr:            true,
+			wantErr:            false,
 		},
 		{
 			name: "Operation annotation ignore -> no reconciliation, no requeue",
@@ -637,7 +678,11 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 					Namespace: testNamespaceName,
 				},
 			},
-			providerConfig:     &fakeProviderConfigImpl{},
+			providerConfig:     &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test",
+				},
+			},
 			want:               ctrl.Result{},
 			wantReconciliation: false,
 			wantErr:            false,
@@ -651,6 +696,9 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 				},
 			},
 			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test",
+				},
 				FakePollInterval: time.Hour,
 			},
 			req: ctrl.Request{
@@ -674,6 +722,7 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 			}
 			builder := NewAPIReconcilerBuilder[*fakeApiImpl, *fakeProviderConfigImpl]().
 				EmptyObjectProvider(func() *fakeApiImpl { return &fakeApiImpl{} }).
+				EmptyConfigProvider(func() *fakeProviderConfigImpl { return &fakeProviderConfigImpl{} }).
 				OnboardingCluster(onboardingCluster).
 				PlatformCluster(platformCluster).
 				AdvancedClusterAccessReconciler(FakeAdvancedClusterAccessProvider{
@@ -709,6 +758,10 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 				Reconciler(mockReconciler).
 				WorkloadCluster(true)
 			r := builder.MustBuild()
+			if tt.providerConfig != nil {
+				r.providerName = tt.providerConfig.Name
+				require.NoError(t, platformCluster.Client().Create(context.TODO(), tt.providerConfig))
+			}
 			got, gotErr := r.Reconcile(context.Background(), tt.req)
 			if gotErr != nil {
 				if !tt.wantErr {
