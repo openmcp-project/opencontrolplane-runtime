@@ -927,8 +927,12 @@ func TestMapSecretToRequests(t *testing.T) {
 			secret: &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: testNamespaceName},
 			},
-			referenced:     map[string]bool{secretName: true},
-			providerConfig: &fakeProviderConfigImpl{FakePollInterval: time.Hour},
+			referenced: map[string]bool{secretName: true},
+			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
+				FakePollInterval: time.Hour},
 			existingObjs: []client.Object{
 				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-1", Namespace: testNamespaceName}}, //nolint:goconst
 				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-2", Namespace: testNamespaceName}},
@@ -940,8 +944,12 @@ func TestMapSecretToRequests(t *testing.T) {
 			secret: &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{Name: "other-secret", Namespace: testNamespaceName},
 			},
-			referenced:     map[string]bool{secretName: true},
-			providerConfig: &fakeProviderConfigImpl{FakePollInterval: time.Hour},
+			referenced: map[string]bool{secretName: true},
+			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
+				FakePollInterval: time.Hour},
 			existingObjs: []client.Object{
 				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-1", Namespace: testNamespaceName}},
 			},
@@ -952,10 +960,14 @@ func TestMapSecretToRequests(t *testing.T) {
 			secret: &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: testNamespaceName},
 			},
-			referenced:     map[string]bool{secretName: true},
-			providerConfig: &fakeProviderConfigImpl{FakePollInterval: time.Hour},
-			existingObjs:   nil,
-			wantRequests:   0,
+			referenced: map[string]bool{secretName: true},
+			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
+				FakePollInterval: time.Hour},
+			existingObjs: nil,
+			wantRequests: 0,
 		},
 		{
 			name: "nil provider config does not panic",
@@ -972,6 +984,7 @@ func TestMapSecretToRequests(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			onboardingCluster := createFakeClusterWithUnstructuredList(t, "onboarding", tt.existingObjs)
+			platformCluster := createFakeCluster(t, "platform")
 
 			mockSW := &MockSecretWatchingReconciler{
 				referencedSecrets: tt.referenced,
@@ -979,8 +992,14 @@ func TestMapSecretToRequests(t *testing.T) {
 
 			r := &APIReconciler[*fakeApiImpl, *fakeProviderConfigImpl]{
 				emptyObj:          func() *fakeApiImpl { return &fakeApiImpl{} },
+				emptyConfig:       func() *fakeProviderConfigImpl { return &fakeProviderConfigImpl{} },
 				onboardingCluster: onboardingCluster,
+				platformCluster:   platformCluster,
 				reconciler:        mockSW,
+			}
+			if tt.providerConfig != nil {
+				r.providerName = tt.providerConfig.Name
+				require.NoError(t, platformCluster.Client().Create(context.TODO(), tt.providerConfig))
 			}
 
 			mapFn := r.mapSecretToRequests(mockSW)
@@ -1060,8 +1079,12 @@ func TestMapConfigMapToRequests(t *testing.T) {
 			configMap: &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: testNamespaceName},
 			},
-			referenced:     map[string]bool{configMapName: true},
-			providerConfig: &fakeProviderConfigImpl{FakePollInterval: time.Hour},
+			referenced: map[string]bool{configMapName: true},
+			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
+				FakePollInterval: time.Hour},
 			existingObjs: []client.Object{
 				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-1", Namespace: testNamespaceName}},
 				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-2", Namespace: testNamespaceName}},
@@ -1073,8 +1096,12 @@ func TestMapConfigMapToRequests(t *testing.T) {
 			configMap: &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{Name: "other-configmap", Namespace: testNamespaceName},
 			},
-			referenced:     map[string]bool{configMapName: true},
-			providerConfig: &fakeProviderConfigImpl{FakePollInterval: time.Hour},
+			referenced: map[string]bool{configMapName: true},
+			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
+				FakePollInterval: time.Hour},
 			existingObjs: []client.Object{
 				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-1", Namespace: testNamespaceName}},
 			},
@@ -1085,10 +1112,14 @@ func TestMapConfigMapToRequests(t *testing.T) {
 			configMap: &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: testNamespaceName},
 			},
-			referenced:     map[string]bool{configMapName: true},
-			providerConfig: &fakeProviderConfigImpl{FakePollInterval: time.Hour},
-			existingObjs:   nil,
-			wantRequests:   0,
+			referenced: map[string]bool{configMapName: true},
+			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
+				FakePollInterval: time.Hour},
+			existingObjs: nil,
+			wantRequests: 0,
 		},
 		{
 			name: "nil provider config does not panic",
@@ -1105,6 +1136,7 @@ func TestMapConfigMapToRequests(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			onboardingCluster := createFakeClusterWithUnstructuredList(t, "onboarding", tt.existingObjs)
+			platformCluster := createFakeCluster(t, "platform")
 
 			mockCW := &MockConfigMapWatchingReconciler{
 				referencedConfigMaps: tt.referenced,
@@ -1112,8 +1144,13 @@ func TestMapConfigMapToRequests(t *testing.T) {
 
 			r := &APIReconciler[*fakeApiImpl, *fakeProviderConfigImpl]{
 				emptyObj:          func() *fakeApiImpl { return &fakeApiImpl{} },
+				emptyConfig:       func() *fakeProviderConfigImpl { return &fakeProviderConfigImpl{} },
 				onboardingCluster: onboardingCluster,
 				reconciler:        mockCW,
+			}
+			if tt.providerConfig != nil {
+				r.providerName = tt.providerConfig.Name
+				require.NoError(t, platformCluster.Client().Create(context.TODO(), tt.providerConfig))
 			}
 
 			mapFn := r.mapConfigMapToRequests(mockCW)
