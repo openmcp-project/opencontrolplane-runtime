@@ -79,7 +79,7 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 			},
 			providerConfig: &fakeProviderConfigImpl{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test",
+					Name: testObjectName,
 				},
 				FakePollInterval: time.Hour,
 			},
@@ -106,7 +106,7 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 			},
 			providerConfig: &fakeProviderConfigImpl{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test",
+					Name: testObjectName,
 				},
 				FakePollInterval: time.Hour,
 			},
@@ -135,7 +135,7 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 			},
 			providerConfig: &fakeProviderConfigImpl{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test",
+					Name: testObjectName,
 				},
 				FakePollInterval: time.Hour,
 			},
@@ -166,7 +166,7 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 			},
 			providerConfig: &fakeProviderConfigImpl{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test",
+					Name: testObjectName,
 				},
 				FakePollInterval: time.Hour,
 			},
@@ -195,7 +195,7 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 			},
 			providerConfig: &fakeProviderConfigImpl{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test",
+					Name: testObjectName,
 				},
 				FakePollInterval: time.Hour,
 			},
@@ -240,9 +240,9 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 					Namespace: testNamespaceName,
 				},
 			},
-			providerConfig:     &fakeProviderConfigImpl{
+			providerConfig: &fakeProviderConfigImpl{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test",
+					Name: testObjectName,
 				},
 			},
 			want:               ctrl.Result{},
@@ -259,7 +259,7 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 			},
 			providerConfig: &fakeProviderConfigImpl{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test",
+					Name: testObjectName,
 				},
 				FakePollInterval: time.Hour,
 			},
@@ -517,7 +517,7 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 			},
 			providerConfig: &fakeProviderConfigImpl{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test",
+					Name: testObjectName,
 				},
 				FakePollInterval: time.Hour,
 			},
@@ -544,7 +544,7 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 			},
 			providerConfig: &fakeProviderConfigImpl{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test",
+					Name: testObjectName,
 				},
 				FakePollInterval: time.Hour,
 			},
@@ -573,7 +573,7 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 			},
 			providerConfig: &fakeProviderConfigImpl{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test",
+					Name: testObjectName,
 				},
 				FakePollInterval: time.Hour,
 			},
@@ -604,7 +604,7 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 			},
 			providerConfig: &fakeProviderConfigImpl{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test",
+					Name: testObjectName,
 				},
 				FakePollInterval: time.Hour,
 			},
@@ -633,7 +633,7 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 			},
 			providerConfig: &fakeProviderConfigImpl{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test",
+					Name: testObjectName,
 				},
 				FakePollInterval: time.Hour,
 			},
@@ -678,9 +678,9 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 					Namespace: testNamespaceName,
 				},
 			},
-			providerConfig:     &fakeProviderConfigImpl{
+			providerConfig: &fakeProviderConfigImpl{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test",
+					Name: testObjectName,
 				},
 			},
 			want:               ctrl.Result{},
@@ -697,7 +697,7 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 			},
 			providerConfig: &fakeProviderConfigImpl{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test",
+					Name: testObjectName,
 				},
 				FakePollInterval: time.Hour,
 			},
