@@ -73,6 +73,9 @@ func (b *APIReconcilerBuilder[T, C]) MustBuild() *APIReconciler[T, C] {
 	if b.apiReconciler.emptyObj == nil {
 		panic("empty object provider is required")
 	}
+	if b.apiReconciler.emptyConfig == nil {
+		panic("empty config provider is required")
+	}
 	if b.apiReconciler.onboardingCluster == nil {
 		panic("onboarding cluster is required")
 	}
@@ -184,6 +187,10 @@ func (r *APIReconciler[T, C]) Reconcile(ctx context.Context, req ctrl.Request) (
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
+	}
+	if !providerConfig.GetDeletionTimestamp().IsZero() {
+		StatusProgressing(obj, reasonReconcileError, "ProviderConfig is marked for deletion")
+		return ctrl.Result{}, nil
 	}
 	providerConfigCopy := providerConfig.DeepCopyObject().(C)
 	// generate additional data
@@ -358,15 +365,19 @@ func (r *APIReconciler[T, C]) clusters(ctx context.Context, req ctrl.Request, ad
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *APIReconciler[T, C]) SetupWithManager(mgr ctrl.Manager, name string) error {
-	r.providerName = name
-	controller := ctrl.NewControllerManagedBy(mgr).For(r.emptyObj()).
+func (r *APIReconciler[T, C]) SetupWithManager(mgr ctrl.Manager, providerName string) error {
+	if providerName == "" {
+		panic("provider name is required for manager setup")
+	}
+	r.providerName = providerName
+	controller := ctrl.NewControllerManagedBy(mgr).
+		For(r.emptyObj()).
 		// add provider config watch
 		WatchesRawSource(source.Kind(
 			r.platformCluster.Cluster().GetCache(),
 			r.emptyConfig(),
-			&handler.TypedEnqueueRequestForObject[C]{},
-			controllerutil2.ToTypedPredicate[C](controllerutil2.ExactNamePredicate(name, "")),
+			handler.TypedEnqueueRequestsFromMapFunc(r.mapProviderConfigToRequests()),
+			controllerutil2.ToTypedPredicate[C](controllerutil2.ExactNamePredicate(providerName, "")),
 		))
 
 	// Optional: watch secrets on the platform cluster if the reconciler implements SecretWatcher
@@ -401,7 +412,7 @@ func (r *APIReconciler[T, C]) SetupWithManager(mgr ctrl.Manager, name string) er
 		)
 	}
 
-	return controller.Named(name).Complete(r)
+	return controller.Named(providerName).Complete(r)
 }
 
 // mapSecretToRequests returns a typed map function that checks whether a changed secret
@@ -432,6 +443,12 @@ func (r *APIReconciler[T, C]) mapConfigMapToRequests(cw ConfigMapWatcher[C]) fun
 		if !cw.IsReferencedConfigMap(ctx, configMap, providerConfig) {
 			return nil
 		}
+		return r.enqueueAllObjects(ctx)
+	}
+}
+
+func (r *APIReconciler[T, C]) mapProviderConfigToRequests() func(ctx context.Context, _ C) []reconcile.Request {
+	return func(ctx context.Context, _ C) []reconcile.Request {
 		return r.enqueueAllObjects(ctx)
 	}
 }

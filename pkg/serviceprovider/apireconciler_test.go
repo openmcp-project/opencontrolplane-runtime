@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -34,6 +35,11 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	apiv1alpha1 "github.com/openmcp-project/opencontrolplane-runtime/testdata/api/v1alpha1"
+	configv1alpha1 "github.com/openmcp-project/opencontrolplane-runtime/testdata/config/v1alpha1"
 )
 
 const (
@@ -79,7 +85,7 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 			},
 			providerConfig: &fakeProviderConfigImpl{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test",
+					Name: testObjectName,
 				},
 				FakePollInterval: time.Hour,
 			},
@@ -106,7 +112,7 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 			},
 			providerConfig: &fakeProviderConfigImpl{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test",
+					Name: testObjectName,
 				},
 				FakePollInterval: time.Hour,
 			},
@@ -135,7 +141,7 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 			},
 			providerConfig: &fakeProviderConfigImpl{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test",
+					Name: testObjectName,
 				},
 				FakePollInterval: time.Hour,
 			},
@@ -166,7 +172,7 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 			},
 			providerConfig: &fakeProviderConfigImpl{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test",
+					Name: testObjectName,
 				},
 				FakePollInterval: time.Hour,
 			},
@@ -195,7 +201,7 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 			},
 			providerConfig: &fakeProviderConfigImpl{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test",
+					Name: testObjectName,
 				},
 				FakePollInterval: time.Hour,
 			},
@@ -240,9 +246,9 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 					Namespace: testNamespaceName,
 				},
 			},
-			providerConfig:     &fakeProviderConfigImpl{
+			providerConfig: &fakeProviderConfigImpl{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test",
+					Name: testObjectName,
 				},
 			},
 			want:               ctrl.Result{},
@@ -259,7 +265,7 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 			},
 			providerConfig: &fakeProviderConfigImpl{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test",
+					Name: testObjectName,
 				},
 				FakePollInterval: time.Hour,
 			},
@@ -517,7 +523,7 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 			},
 			providerConfig: &fakeProviderConfigImpl{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test",
+					Name: testObjectName,
 				},
 				FakePollInterval: time.Hour,
 			},
@@ -544,7 +550,7 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 			},
 			providerConfig: &fakeProviderConfigImpl{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test",
+					Name: testObjectName,
 				},
 				FakePollInterval: time.Hour,
 			},
@@ -573,7 +579,7 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 			},
 			providerConfig: &fakeProviderConfigImpl{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test",
+					Name: testObjectName,
 				},
 				FakePollInterval: time.Hour,
 			},
@@ -604,7 +610,7 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 			},
 			providerConfig: &fakeProviderConfigImpl{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test",
+					Name: testObjectName,
 				},
 				FakePollInterval: time.Hour,
 			},
@@ -633,7 +639,7 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 			},
 			providerConfig: &fakeProviderConfigImpl{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test",
+					Name: testObjectName,
 				},
 				FakePollInterval: time.Hour,
 			},
@@ -678,9 +684,9 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 					Namespace: testNamespaceName,
 				},
 			},
-			providerConfig:     &fakeProviderConfigImpl{
+			providerConfig: &fakeProviderConfigImpl{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test",
+					Name: testObjectName,
 				},
 			},
 			want:               ctrl.Result{},
@@ -697,7 +703,7 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 			},
 			providerConfig: &fakeProviderConfigImpl{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test",
+					Name: testObjectName,
 				},
 				FakePollInterval: time.Hour,
 			},
@@ -927,8 +933,12 @@ func TestMapSecretToRequests(t *testing.T) {
 			secret: &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: testNamespaceName},
 			},
-			referenced:     map[string]bool{secretName: true},
-			providerConfig: &fakeProviderConfigImpl{FakePollInterval: time.Hour},
+			referenced: map[string]bool{secretName: true},
+			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
+				FakePollInterval: time.Hour},
 			existingObjs: []client.Object{
 				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-1", Namespace: testNamespaceName}}, //nolint:goconst
 				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-2", Namespace: testNamespaceName}},
@@ -940,8 +950,12 @@ func TestMapSecretToRequests(t *testing.T) {
 			secret: &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{Name: "other-secret", Namespace: testNamespaceName},
 			},
-			referenced:     map[string]bool{secretName: true},
-			providerConfig: &fakeProviderConfigImpl{FakePollInterval: time.Hour},
+			referenced: map[string]bool{secretName: true},
+			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
+				FakePollInterval: time.Hour},
 			existingObjs: []client.Object{
 				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-1", Namespace: testNamespaceName}},
 			},
@@ -952,10 +966,14 @@ func TestMapSecretToRequests(t *testing.T) {
 			secret: &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: testNamespaceName},
 			},
-			referenced:     map[string]bool{secretName: true},
-			providerConfig: &fakeProviderConfigImpl{FakePollInterval: time.Hour},
-			existingObjs:   nil,
-			wantRequests:   0,
+			referenced: map[string]bool{secretName: true},
+			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
+				FakePollInterval: time.Hour},
+			existingObjs: nil,
+			wantRequests: 0,
 		},
 		{
 			name: "nil provider config does not panic",
@@ -972,6 +990,7 @@ func TestMapSecretToRequests(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			onboardingCluster := createFakeClusterWithUnstructuredList(t, "onboarding", tt.existingObjs)
+			platformCluster := createFakeCluster(t, "platform")
 
 			mockSW := &MockSecretWatchingReconciler{
 				referencedSecrets: tt.referenced,
@@ -979,8 +998,14 @@ func TestMapSecretToRequests(t *testing.T) {
 
 			r := &APIReconciler[*fakeApiImpl, *fakeProviderConfigImpl]{
 				emptyObj:          func() *fakeApiImpl { return &fakeApiImpl{} },
+				emptyConfig:       func() *fakeProviderConfigImpl { return &fakeProviderConfigImpl{} },
 				onboardingCluster: onboardingCluster,
+				platformCluster:   platformCluster,
 				reconciler:        mockSW,
+			}
+			if tt.providerConfig != nil {
+				r.providerName = tt.providerConfig.Name
+				require.NoError(t, platformCluster.Client().Create(context.TODO(), tt.providerConfig))
 			}
 
 			mapFn := r.mapSecretToRequests(mockSW)
@@ -1060,8 +1085,12 @@ func TestMapConfigMapToRequests(t *testing.T) {
 			configMap: &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: testNamespaceName},
 			},
-			referenced:     map[string]bool{configMapName: true},
-			providerConfig: &fakeProviderConfigImpl{FakePollInterval: time.Hour},
+			referenced: map[string]bool{configMapName: true},
+			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
+				FakePollInterval: time.Hour},
 			existingObjs: []client.Object{
 				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-1", Namespace: testNamespaceName}},
 				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-2", Namespace: testNamespaceName}},
@@ -1073,8 +1102,12 @@ func TestMapConfigMapToRequests(t *testing.T) {
 			configMap: &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{Name: "other-configmap", Namespace: testNamespaceName},
 			},
-			referenced:     map[string]bool{configMapName: true},
-			providerConfig: &fakeProviderConfigImpl{FakePollInterval: time.Hour},
+			referenced: map[string]bool{configMapName: true},
+			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
+				FakePollInterval: time.Hour},
 			existingObjs: []client.Object{
 				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-1", Namespace: testNamespaceName}},
 			},
@@ -1085,10 +1118,14 @@ func TestMapConfigMapToRequests(t *testing.T) {
 			configMap: &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: testNamespaceName},
 			},
-			referenced:     map[string]bool{configMapName: true},
-			providerConfig: &fakeProviderConfigImpl{FakePollInterval: time.Hour},
-			existingObjs:   nil,
-			wantRequests:   0,
+			referenced: map[string]bool{configMapName: true},
+			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
+				FakePollInterval: time.Hour},
+			existingObjs: nil,
+			wantRequests: 0,
 		},
 		{
 			name: "nil provider config does not panic",
@@ -1105,6 +1142,7 @@ func TestMapConfigMapToRequests(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			onboardingCluster := createFakeClusterWithUnstructuredList(t, "onboarding", tt.existingObjs)
+			platformCluster := createFakeCluster(t, "platform")
 
 			mockCW := &MockConfigMapWatchingReconciler{
 				referencedConfigMaps: tt.referenced,
@@ -1112,8 +1150,14 @@ func TestMapConfigMapToRequests(t *testing.T) {
 
 			r := &APIReconciler[*fakeApiImpl, *fakeProviderConfigImpl]{
 				emptyObj:          func() *fakeApiImpl { return &fakeApiImpl{} },
+				emptyConfig:       func() *fakeProviderConfigImpl { return &fakeProviderConfigImpl{} },
 				onboardingCluster: onboardingCluster,
+				platformCluster:   platformCluster,
 				reconciler:        mockCW,
+			}
+			if tt.providerConfig != nil {
+				r.providerName = tt.providerConfig.Name
+				require.NoError(t, platformCluster.Client().Create(context.TODO(), tt.providerConfig))
 			}
 
 			mapFn := r.mapConfigMapToRequests(mockCW)
@@ -1151,3 +1195,63 @@ func (f *fakeProviderConfigImpl) DeepCopyObject() runtime.Object {
 func (f *fakeProviderConfigImpl) PollInterval() time.Duration {
 	return f.FakePollInterval
 }
+
+// tests the provider config watch
+var _ = Describe("API Reconciler", func() {
+	AfterEach(func() {
+		// reset mock
+		reconciler.createOrUpdateCalled = false
+		reconciler.deleteCalled = false
+		reconciler.config = configv1alpha1.ProviderConfig{}
+	})
+
+	Context("When a ProviderConfig and a Foo resource exists", func() {
+		const resourceName = "test-resource"
+		ctx := context.Background()
+		configKey := types.NamespacedName{Name: "foo"}
+		fooKey := types.NamespacedName{Name: resourceName, Namespace: "default"}
+
+		BeforeEach(func() {
+			// create a provider config and a foo resource if they don't exist
+			config := &configv1alpha1.ProviderConfig{}
+			config.SetName(configKey.Name)
+			err := platformClient.Get(ctx, configKey, config)
+			if err != nil && apierrors.IsNotFound(err) {
+				Expect(platformClient.Create(ctx, config)).To(Succeed())
+			}
+			foo := &apiv1alpha1.Foo{}
+			foo.SetName(fooKey.Name)
+			foo.SetNamespace(fooKey.Namespace)
+			err = onboardingClient.Get(ctx, fooKey, foo)
+			if err != nil && apierrors.IsNotFound(err) {
+				Expect(onboardingClient.Create(ctx, foo)).To(Succeed())
+			}
+		})
+
+		It("The Foo resource should get ready", func() {
+			By("Reconciling the created resource")
+			Eventually(func() bool { return reconciler.createOrUpdateCalled }).Should(BeTrueBecause("APIReconciler invoked CreateOrUpdate of mock"))
+			Eventually(func() apiv1alpha1.FooStatus {
+				foo := &apiv1alpha1.Foo{}
+				foo.SetName(fooKey.Name)
+				foo.SetNamespace(fooKey.Namespace)
+				Expect(onboardingClient.Get(ctx, fooKey, foo)).To(Succeed())
+				return foo.Status
+			}).Should(HaveField("Phase", Equal("Ready")))
+			// verify poll interval default is applied on initial create
+			Eventually(func() time.Duration { return reconciler.config.PollInterval() }).Should(Equal(time.Minute))
+		})
+
+		It("The Foo resource is reconciled when the provider config changes", func() {
+			By("Creating a reconcile request for the existing Foo resource")
+			config := &configv1alpha1.ProviderConfig{}
+			config.SetName(configKey.Name)
+			Expect(platformClient.Get(ctx, configKey, config)).To(Succeed())
+			config.Spec.PollInterval = &metav1.Duration{Duration: time.Hour}
+			Expect(platformClient.Update(ctx, config)).To(Succeed())
+			Eventually(func() bool { return reconciler.createOrUpdateCalled }).Should(BeTrueBecause("update results in reconcile request"))
+			// verify poll interval matches the updated provider config
+			Eventually(func() time.Duration { return reconciler.config.PollInterval() }).Should(Equal(time.Hour))
+		})
+	})
+})
