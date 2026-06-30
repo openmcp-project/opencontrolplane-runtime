@@ -35,7 +35,7 @@ var _ = Describe("Foo Controller", func() {
 		ctx := context.Background()
 
 		typeNamespacedName := types.NamespacedName{
-			Name:      "foo",
+			Name: "foo",
 		}
 		providerConfig := &v1alpha1.ProviderConfig{}
 
@@ -45,7 +45,7 @@ var _ = Describe("Foo Controller", func() {
 			if err != nil && errors.IsNotFound(err) {
 				resource := &v1alpha1.ProviderConfig{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      "foo",
+						Name: "foo",
 					},
 				}
 				Expect(platformClient.Create(ctx, resource)).To(Succeed())

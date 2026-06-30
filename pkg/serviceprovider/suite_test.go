@@ -127,8 +127,8 @@ func getFirstFoundEnvTestBinaryDir() string {
 func createPlatformEnv() {
 	By("bootstrapping platform test environment")
 	platformEnv = &envtest.Environment{
-		CRDDirectoryPaths:        []string{filepath.Join("..", "..", "test", "api", "crd", "bases")},
-		ErrorIfCRDPathMissing:    true,
+		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "test", "api", "crd", "bases")},
+		ErrorIfCRDPathMissing: true,
 		// AttachControlPlaneOutput: true,
 	}
 
@@ -151,8 +151,8 @@ func createPlatformEnv() {
 func createOnboardingEnv() {
 	By("bootstrapping onboarding test environment")
 	onboardingEnv = &envtest.Environment{
-		CRDDirectoryPaths:        []string{filepath.Join("..", "..", "test", "api", "crd", "bases")},
-		ErrorIfCRDPathMissing:    true,
+		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "test", "api", "crd", "bases")},
+		ErrorIfCRDPathMissing: true,
 		// AttachControlPlaneOutput: true,
 	}
 
@@ -227,7 +227,6 @@ func newReconciler() *APIReconciler[*v1alpha1.FooService, *v1alpha1.ProviderConf
 var _ Reconciler[*v1alpha1.FooService, *v1alpha1.ProviderConfig] = &MockFooReconciler{}
 
 type MockFooReconciler struct {
-	config  Config
 	created chan v1alpha1.ProviderConfig
 	deleted chan v1alpha1.ProviderConfig
 }
