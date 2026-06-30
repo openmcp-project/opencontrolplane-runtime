@@ -1,0 +1,60 @@
+version: "3"
+
+vars:
+  LOCALBIN: "{{.ROOT_DIR}}/bin"
+  CONTROLLER_GEN_VERSION: '{{ .CONTROLLER_GEN_VERSION | default "v0.21.0" }}'
+  CONTROLLER_GEN: "{{.LOCALBIN}}/controller-gen"
+  ENVTEST_VERSION: '{{ .ENVTEST_VESRION | default "v0.24.0" }}'
+  ENVTEST_K8S_VERSION: '{{ .ENVTEST_K8S_VESRION | default "1.36.0" }}'
+  ENVTEST_SETUP: "{{.LOCALBIN}}/setup-envtest"
+
+tasks:
+  gen:install:
+    desc: Install controller-gen locally
+    generates:
+      - "{{.CONTROLLER_GEN}}"
+    run: once
+    cmds:
+      - mkdir -p {{.LOCALBIN}}
+      - GOBIN={{.LOCALBIN}} go install sigs.k8s.io/controller-tools/cmd/controller-gen@{{.CONTROLLER_GEN_VERSION}}
+
+  test:generate:
+    desc: gen code + manifests
+    deps:
+      - gen:install
+    cmds:
+      - task: test:gen:code
+      - task: test:gen:manifests
+
+  test:gen:code:
+    desc: Generate deepcopy methods and CRDs for the test API
+    deps:
+      - gen:install
+    cmds:
+      - >
+        {{.CONTROLLER_GEN}} object paths=./test/api/...
+
+  test:gen:manifests:
+    desc: Generate deepcopy methods and CRDs for the test API
+    deps:
+      - controller-gen
+    cmds:
+      - >
+        {{.CONTROLLER_GEN}} crd:allowDangerousTypes=true paths=./test/api/... output:crd:artifacts:config=test/api/crd/bases
+
+  envtest:install:
+    desc: Install setup-envtest locally
+    generates:
+      - "{{.ENVTEST_SETUP}}"
+    run: once
+    cmds:
+      - mkdir -p {{.LOCALBIN}}
+      - GOBIN={{.LOCALBIN}} go install sigs.k8s.io/controller-runtime/tools/setup-envtest@{{.ENVTEST_VERSION}}
+
+  envtest:setup:
+    desc: Run setup-envtest
+    deps:
+      - envtest:install
+    cmds:
+      - >
+        {{.ENVTEST_SETUP}} use {{.ENVTEST_K8S_VERSION}} --bin-dir {{.LOCALBIN}}

@@ -4,6 +4,8 @@ go 1.26.4
 
 require (
 	github.com/go-logr/zapr v1.3.0
+	github.com/onsi/ginkgo/v2 v2.31.0
+	github.com/onsi/gomega v1.42.0
 	github.com/openmcp-project/controller-utils v0.30.0
 	github.com/openmcp-project/openmcp-operator/api v1.1.0
 	github.com/stretchr/testify v1.11.1
@@ -15,7 +17,15 @@ require (
 	sigs.k8s.io/controller-runtime v0.24.1
 )
 
-require golang.org/x/exp v0.0.0-20260611194520-c48552f49976 // indirect
+require (
+	github.com/Masterminds/semver/v3 v3.5.0 // indirect
+	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
+	github.com/google/go-cmp v0.7.0 // indirect
+	github.com/google/pprof v0.0.0-20260402051712-545e8a4df936 // indirect
+	golang.org/x/exp v0.0.0-20260611194520-c48552f49976 // indirect
+	golang.org/x/mod v0.37.0 // indirect
+	golang.org/x/tools v0.46.0 // indirect
+)
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect

@@ -363,7 +363,8 @@ func (r *APIReconciler[T, C]) clusters(ctx context.Context, req ctrl.Request, ad
 // SetupWithManager sets up the controller with the Manager.
 func (r *APIReconciler[T, C]) SetupWithManager(mgr ctrl.Manager, name string) error {
 	r.providerName = name
-	controller := ctrl.NewControllerManagedBy(mgr).For(r.emptyObj()).
+	controller := ctrl.NewControllerManagedBy(mgr).
+		For(r.emptyObj()).
 		// add provider config watch
 		WatchesRawSource(source.Kind(
 			r.platformCluster.Cluster().GetCache(),
