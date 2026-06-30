@@ -27,5 +27,14 @@ jobs:
         with:
           version: v2.12.2
 
+      - name: Install Task
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup envtest
+        run: task test:generate
+
       - name: Test
         run: go test ./...
