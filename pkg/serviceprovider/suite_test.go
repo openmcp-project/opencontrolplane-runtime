@@ -181,8 +181,8 @@ func newReconciler() *APIReconciler[*v1alpha1.FooService, *v1alpha1.ProviderConf
 		panic(err)
 	}
 	reconciler = &MockFooReconciler{
-		created: make(chan v1alpha1.ProviderConfig, 100),
-		deleted: make(chan v1alpha1.ProviderConfig, 100),
+		created: make(chan v1alpha1.ProviderConfig, 10),
+		deleted: make(chan v1alpha1.ProviderConfig, 10),
 	}
 	builder := NewAPIReconcilerBuilder[*v1alpha1.FooService, *v1alpha1.ProviderConfig]().
 		EmptyObjectProvider(func() *v1alpha1.FooService { return &v1alpha1.FooService{} }).

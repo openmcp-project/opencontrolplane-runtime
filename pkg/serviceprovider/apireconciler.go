@@ -369,7 +369,7 @@ func (r *APIReconciler[T, C]) SetupWithManager(mgr ctrl.Manager, name string) er
 		WatchesRawSource(source.Kind(
 			r.platformCluster.Cluster().GetCache(),
 			r.emptyConfig(),
-			&handler.TypedEnqueueRequestForObject[C]{},
+			handler.TypedEnqueueRequestsFromMapFunc(r.mapProviderConfigToRequests()),
 			controllerutil2.ToTypedPredicate[C](controllerutil2.ExactNamePredicate(name, "")),
 		))
 
@@ -436,6 +436,12 @@ func (r *APIReconciler[T, C]) mapConfigMapToRequests(cw ConfigMapWatcher[C]) fun
 		if !cw.IsReferencedConfigMap(ctx, configMap, providerConfig) {
 			return nil
 		}
+		return r.enqueueAllObjects(ctx)
+	}
+}
+
+func (r *APIReconciler[T, C]) mapProviderConfigToRequests() func(ctx context.Context, _ C) []reconcile.Request {
+	return func(ctx context.Context, _ C) []reconcile.Request {
 		return r.enqueueAllObjects(ctx)
 	}
 }

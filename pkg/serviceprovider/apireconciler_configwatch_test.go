@@ -18,6 +18,7 @@ package serviceprovider
 
 import (
 	"context"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -43,50 +44,50 @@ var _ = Describe("Foo Controller", func() {
 			By("create provider config instance foo")
 			err := platformClient.Get(ctx, typeNamespacedName, providerConfig)
 			if err != nil && errors.IsNotFound(err) {
-				resource := &v1alpha1.ProviderConfig{
+				config := &v1alpha1.ProviderConfig{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "foo",
 					},
 				}
-				Expect(platformClient.Create(ctx, resource)).To(Succeed())
+				Expect(platformClient.Create(ctx, config)).To(Succeed())
 			}
 		})
 
 		AfterEach(func() {
-			// TODO(user): Cleanup logic after each test, like removing the resource instance.
-			resource := &v1alpha1.ProviderConfig{
+			// TODO(user): Cleanup logic after each test, like removing the config instance.
+			config := &v1alpha1.ProviderConfig{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "foo",
 				},
 			}
-			err := platformClient.Get(ctx, typeNamespacedName, resource)
+			err := platformClient.Get(ctx, typeNamespacedName, config)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Cleanup provider config instance foo")
-			Expect(platformClient.Delete(ctx, resource)).To(Succeed())
+			Expect(platformClient.Delete(ctx, config)).To(Succeed())
 		})
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
-			resource := &v1alpha1.FooService{
+			foo := &v1alpha1.FooService{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      resourceName,
 					Namespace: "default",
 				},
-				// TODO(user): Specify other spec details if needed.
 			}
-			Expect(onboardingClient.Create(ctx, resource)).To(Succeed())
+			Expect(onboardingClient.Create(ctx, foo)).To(Succeed())
 			Eventually(reconciler.created, "10m").Should(Receive())
-			// controllerReconciler := &FooReconciler{
-			// 	Client: k8sClient,
-			// 	Scheme: k8sClient.Scheme(),
-			// }
-
-			// _, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-			// 	NamespacedName: typeNamespacedName,
-			// })
-			// Expect(err).NotTo(HaveOccurred())
-			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
-			// Example: If you expect a certain status condition after reconciliation, verify it here.
+		})
+		It("should receive a reconcile request when the provider config changes", func() {
+			By("Reconciling the existing resource")
+			config := &v1alpha1.ProviderConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "foo",
+				},
+			}
+			Expect(platformClient.Get(ctx, typeNamespacedName, config)).To(Succeed())
+			config.Spec.PollInterval = &metav1.Duration{Duration: time.Hour}
+			Expect(platformClient.Update(ctx, config)).To(Succeed())
+			Eventually(reconciler.created, "5s").Should(Receive(&v1alpha1.ProviderConfig{}, HaveField("Spec.PollInterval", &metav1.Duration{Duration: time.Hour})))
 		})
 	})
 })
