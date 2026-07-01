@@ -75,7 +75,9 @@ var _ = Describe("Foo Controller", func() {
 				},
 			}
 			Expect(onboardingClient.Create(ctx, foo)).To(Succeed())
-			Eventually(reconciler.createOrUpdateConfig).Should(Receive())
+			Eventually(func() time.Duration {
+				return reconciler.config.PollInterval()
+			}).Should(Equal(time.Minute))
 		})
 		It("should receive a reconcile request when the provider config changes", func() {
 			By("Reconciling the existing resource")
@@ -87,7 +89,9 @@ var _ = Describe("Foo Controller", func() {
 			Expect(platformClient.Get(ctx, typeNamespacedName, config)).To(Succeed())
 			config.Spec.PollInterval = &metav1.Duration{Duration: time.Hour}
 			Expect(platformClient.Update(ctx, config)).To(Succeed())
-			Eventually(reconciler.createOrUpdateConfig).Should(Receive(&v1alpha1.ProviderConfig{}, HaveField("Spec.PollInterval", &metav1.Duration{Duration: time.Hour})))
+			Eventually(func() time.Duration {
+				return reconciler.config.PollInterval()
+			}).Should(Equal(time.Hour))
 		})
 	})
 })

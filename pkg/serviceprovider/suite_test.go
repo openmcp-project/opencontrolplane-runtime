@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -180,9 +181,11 @@ func fooReconciler() *APIReconciler[*v1alpha1.Foo, *v1alpha1.ProviderConfig] {
 	if err := platformCluster.InitializeClient(scheme.Scheme); err != nil {
 		panic(err)
 	}
-	reconciler = &MockFooReconciler{
-		createOrUpdateConfig: make(chan v1alpha1.ProviderConfig, 10),
-	}
+	reconciler = &MockFooReconciler{config: v1alpha1.ProviderConfig{
+		Spec: v1alpha1.ProviderConfigSpec{
+			PollInterval: &metav1.Duration{Duration: time.Second},
+		},
+	}}
 	builder := NewAPIReconcilerBuilder[*v1alpha1.Foo, *v1alpha1.ProviderConfig]().
 		EmptyObjectProvider(func() *v1alpha1.Foo { return &v1alpha1.Foo{} }).
 		EmptyConfigProvider(func() *v1alpha1.ProviderConfig { return &v1alpha1.ProviderConfig{} }).
@@ -214,13 +217,13 @@ func fooReconciler() *APIReconciler[*v1alpha1.Foo, *v1alpha1.ProviderConfig] {
 var _ Reconciler[*v1alpha1.Foo, *v1alpha1.ProviderConfig] = &MockFooReconciler{}
 
 type MockFooReconciler struct {
-	createOrUpdateConfig chan v1alpha1.ProviderConfig
+	config v1alpha1.ProviderConfig
 }
 
 // CreateOrUpdate implements [Reconciler].
 func (m *MockFooReconciler) CreateOrUpdate(ctx context.Context, obj *v1alpha1.Foo, config *v1alpha1.ProviderConfig, clusters clusteraccess.ClusterContext) (ctrl.Result, error) {
-	m.createOrUpdateConfig <- *config
-	return ctrl.Result{}, nil
+	m.config = *config
+	return ctrl.Result{RequeueAfter: time.Hour}, nil
 }
 
 // Delete implements [Reconciler].
