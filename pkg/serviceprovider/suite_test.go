@@ -82,7 +82,7 @@ var _ = BeforeSuite(func() {
 	})
 	Expect(err).NotTo(HaveOccurred())
 
-	err = newReconciler().SetupWithManager(mgr, "foo")
+	err = fooReconciler().SetupWithManager(mgr, "foo")
 	Expect(err).NotTo(HaveOccurred())
 	mgr.Add(platformCluster.Cluster())
 
@@ -171,7 +171,7 @@ func createOnboardingEnv() {
 	Expect(onboardingClient).NotTo(BeNil())
 }
 
-func newReconciler() *APIReconciler[*v1alpha1.FooService, *v1alpha1.ProviderConfig] {
+func fooReconciler() *APIReconciler[*v1alpha1.Foo, *v1alpha1.ProviderConfig] {
 	onboardingCluster := clusters.New("onboarding").WithRESTConfig(onboardingCfg)
 	if err := onboardingCluster.InitializeClient(scheme.Scheme); err != nil {
 		panic(err)
@@ -181,17 +181,15 @@ func newReconciler() *APIReconciler[*v1alpha1.FooService, *v1alpha1.ProviderConf
 		panic(err)
 	}
 	reconciler = &MockFooReconciler{
-		created: make(chan v1alpha1.ProviderConfig, 10),
-		deleted: make(chan v1alpha1.ProviderConfig, 10),
+		createOrUpdateConfig: make(chan v1alpha1.ProviderConfig, 10),
 	}
-	builder := NewAPIReconcilerBuilder[*v1alpha1.FooService, *v1alpha1.ProviderConfig]().
-		EmptyObjectProvider(func() *v1alpha1.FooService { return &v1alpha1.FooService{} }).
+	builder := NewAPIReconcilerBuilder[*v1alpha1.Foo, *v1alpha1.ProviderConfig]().
+		EmptyObjectProvider(func() *v1alpha1.Foo { return &v1alpha1.Foo{} }).
 		EmptyConfigProvider(func() *v1alpha1.ProviderConfig { return &v1alpha1.ProviderConfig{} }).
 		OnboardingCluster(onboardingCluster).
 		PlatformCluster(platformCluster).
 		AdvancedClusterAccessReconciler(FakeAdvancedClusterAccessProvider{
 			clusters: map[string]*clusters.Cluster{
-				// TODO
 				clusteraccess.MCPClusterID: {},
 			},
 			accessRequests: map[string]*clustersv1alpha1.AccessRequest{
@@ -206,17 +204,6 @@ func newReconciler() *APIReconciler[*v1alpha1.FooService, *v1alpha1.ProviderConf
 						},
 					},
 				},
-				clusteraccess.WorkloadClusterID: {
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      testWorkloadName,
-						Namespace: testNamespaceName,
-					},
-					Status: clustersv1alpha1.AccessRequestStatus{
-						SecretRef: &common.LocalObjectReference{
-							Name: testWorkloadKubeconfig,
-						},
-					},
-				},
 			},
 		}).
 		Reconciler(reconciler).
@@ -224,21 +211,19 @@ func newReconciler() *APIReconciler[*v1alpha1.FooService, *v1alpha1.ProviderConf
 	return builder.MustBuild()
 }
 
-var _ Reconciler[*v1alpha1.FooService, *v1alpha1.ProviderConfig] = &MockFooReconciler{}
+var _ Reconciler[*v1alpha1.Foo, *v1alpha1.ProviderConfig] = &MockFooReconciler{}
 
 type MockFooReconciler struct {
-	created chan v1alpha1.ProviderConfig
-	deleted chan v1alpha1.ProviderConfig
+	createOrUpdateConfig chan v1alpha1.ProviderConfig
 }
 
 // CreateOrUpdate implements [Reconciler].
-func (m *MockFooReconciler) CreateOrUpdate(ctx context.Context, obj *v1alpha1.FooService, config *v1alpha1.ProviderConfig, clusters clusteraccess.ClusterContext) (ctrl.Result, error) {
-	m.created <- *config
+func (m *MockFooReconciler) CreateOrUpdate(ctx context.Context, obj *v1alpha1.Foo, config *v1alpha1.ProviderConfig, clusters clusteraccess.ClusterContext) (ctrl.Result, error) {
+	m.createOrUpdateConfig <- *config
 	return ctrl.Result{}, nil
 }
 
 // Delete implements [Reconciler].
-func (m *MockFooReconciler) Delete(ctx context.Context, obj *v1alpha1.FooService, config *v1alpha1.ProviderConfig, clusters clusteraccess.ClusterContext) (ctrl.Result, error) {
-	m.deleted <- *config
+func (m *MockFooReconciler) Delete(ctx context.Context, obj *v1alpha1.Foo, config *v1alpha1.ProviderConfig, clusters clusteraccess.ClusterContext) (ctrl.Result, error) {
 	return ctrl.Result{}, nil
 }

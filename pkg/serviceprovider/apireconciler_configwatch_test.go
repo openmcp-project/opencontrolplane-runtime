@@ -68,14 +68,14 @@ var _ = Describe("Foo Controller", func() {
 		})
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
-			foo := &v1alpha1.FooService{
+			foo := &v1alpha1.Foo{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      resourceName,
 					Namespace: "default",
 				},
 			}
 			Expect(onboardingClient.Create(ctx, foo)).To(Succeed())
-			Eventually(reconciler.created, "10m").Should(Receive())
+			Eventually(reconciler.createOrUpdateConfig).Should(Receive())
 		})
 		It("should receive a reconcile request when the provider config changes", func() {
 			By("Reconciling the existing resource")
@@ -87,7 +87,7 @@ var _ = Describe("Foo Controller", func() {
 			Expect(platformClient.Get(ctx, typeNamespacedName, config)).To(Succeed())
 			config.Spec.PollInterval = &metav1.Duration{Duration: time.Hour}
 			Expect(platformClient.Update(ctx, config)).To(Succeed())
-			Eventually(reconciler.created, "5s").Should(Receive(&v1alpha1.ProviderConfig{}, HaveField("Spec.PollInterval", &metav1.Duration{Duration: time.Hour})))
+			Eventually(reconciler.createOrUpdateConfig).Should(Receive(&v1alpha1.ProviderConfig{}, HaveField("Spec.PollInterval", &metav1.Duration{Duration: time.Hour})))
 		})
 	})
 })
