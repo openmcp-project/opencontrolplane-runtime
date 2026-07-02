@@ -78,6 +78,9 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 				},
 			},
 			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
 				FakePollInterval: time.Hour,
 			},
 			want: ctrl.Result{
@@ -102,6 +105,9 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 				},
 			},
 			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
 				FakePollInterval: time.Hour,
 			},
 			want:               ctrl.Result{},
@@ -128,6 +134,9 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 				},
 			},
 			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
 				FakePollInterval: time.Hour,
 			},
 			want: ctrl.Result{
@@ -156,6 +165,9 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 				},
 			},
 			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
 				FakePollInterval: time.Hour,
 			},
 			want:               ctrl.Result{},
@@ -182,6 +194,9 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 				},
 			},
 			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
 				FakePollInterval: time.Hour,
 			},
 			want:               ctrl.Result{},
@@ -190,7 +205,7 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 			wantErr:            false,
 		},
 		{
-			name: "provider config not found -> error",
+			name: "provider config not found -> no error since there is no chance of self heal",
 			apiObj: &fakeApiImpl{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      testObjectName,
@@ -206,7 +221,7 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 			want:               ctrl.Result{},
 			wantStatusPhase:    StatusPhaseProgressing,
 			wantReconciliation: false,
-			wantErr:            true,
+			wantErr:            false,
 		},
 		{
 			name: "Operation annotation ignore -> no reconciliation, no requeue",
@@ -225,7 +240,11 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 					Namespace: testNamespaceName,
 				},
 			},
-			providerConfig:     &fakeProviderConfigImpl{},
+			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
+			},
 			want:               ctrl.Result{},
 			wantReconciliation: false,
 			wantErr:            false,
@@ -239,6 +258,9 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 				},
 			},
 			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
 				FakePollInterval: time.Hour,
 			},
 			req: ctrl.Request{
@@ -262,6 +284,7 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 			}
 			builder := NewAPIReconcilerBuilder[*fakeApiImpl, *fakeProviderConfigImpl]().
 				EmptyObjectProvider(func() *fakeApiImpl { return &fakeApiImpl{} }).
+				EmptyConfigProvider(func() *fakeProviderConfigImpl { return &fakeProviderConfigImpl{} }).
 				OnboardingCluster(onboardingCluster).
 				PlatformCluster(platformCluster).
 				ClusterAccessReconciler(FakeClusterAccessProvider{
@@ -292,10 +315,11 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 				}).
 				Reconciler(mockReconciler).
 				WorkloadCluster(true)
-			if tt.providerConfig != nil {
-				builder.ProviderConfig(tt.providerConfig)
-			}
 			r := builder.MustBuild()
+			if tt.providerConfig != nil {
+				r.providerName = tt.providerConfig.Name
+				require.NoError(t, platformCluster.Client().Create(context.TODO(), tt.providerConfig))
+			}
 			got, gotErr := r.Reconcile(context.Background(), tt.req)
 			if gotErr != nil {
 				if !tt.wantErr {
@@ -492,6 +516,9 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 				},
 			},
 			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
 				FakePollInterval: time.Hour,
 			},
 			want: ctrl.Result{
@@ -516,6 +543,9 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 				},
 			},
 			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
 				FakePollInterval: time.Hour,
 			},
 			want:               ctrl.Result{},
@@ -542,6 +572,9 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 				},
 			},
 			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
 				FakePollInterval: time.Hour,
 			},
 			want: ctrl.Result{
@@ -570,6 +603,9 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 				},
 			},
 			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
 				FakePollInterval: time.Hour,
 			},
 			want:               ctrl.Result{},
@@ -596,6 +632,9 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 				},
 			},
 			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
 				FakePollInterval: time.Hour,
 			},
 			want:               ctrl.Result{},
@@ -604,7 +643,7 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 			wantErr:            false,
 		},
 		{
-			name: "provider config not found -> error",
+			name: "provider config not found -> no error since there is no chance of self heal",
 			apiObj: &fakeApiImpl{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      testObjectName,
@@ -620,7 +659,7 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 			want:               ctrl.Result{},
 			wantStatusPhase:    StatusPhaseProgressing,
 			wantReconciliation: false,
-			wantErr:            true,
+			wantErr:            false,
 		},
 		{
 			name: "Operation annotation ignore -> no reconciliation, no requeue",
@@ -639,7 +678,11 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 					Namespace: testNamespaceName,
 				},
 			},
-			providerConfig:     &fakeProviderConfigImpl{},
+			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
+			},
 			want:               ctrl.Result{},
 			wantReconciliation: false,
 			wantErr:            false,
@@ -653,6 +696,9 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 				},
 			},
 			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
 				FakePollInterval: time.Hour,
 			},
 			req: ctrl.Request{
@@ -676,6 +722,7 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 			}
 			builder := NewAPIReconcilerBuilder[*fakeApiImpl, *fakeProviderConfigImpl]().
 				EmptyObjectProvider(func() *fakeApiImpl { return &fakeApiImpl{} }).
+				EmptyConfigProvider(func() *fakeProviderConfigImpl { return &fakeProviderConfigImpl{} }).
 				OnboardingCluster(onboardingCluster).
 				PlatformCluster(platformCluster).
 				AdvancedClusterAccessReconciler(FakeAdvancedClusterAccessProvider{
@@ -710,10 +757,11 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 				}).
 				Reconciler(mockReconciler).
 				WorkloadCluster(true)
-			if tt.providerConfig != nil {
-				builder.ProviderConfig(tt.providerConfig)
-			}
 			r := builder.MustBuild()
+			if tt.providerConfig != nil {
+				r.providerName = tt.providerConfig.Name
+				require.NoError(t, platformCluster.Client().Create(context.TODO(), tt.providerConfig))
+			}
 			got, gotErr := r.Reconcile(context.Background(), tt.req)
 			if gotErr != nil {
 				if !tt.wantErr {
@@ -879,8 +927,12 @@ func TestMapSecretToRequests(t *testing.T) {
 			secret: &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: testNamespaceName},
 			},
-			referenced:     map[string]bool{secretName: true},
-			providerConfig: &fakeProviderConfigImpl{FakePollInterval: time.Hour},
+			referenced: map[string]bool{secretName: true},
+			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
+				FakePollInterval: time.Hour},
 			existingObjs: []client.Object{
 				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-1", Namespace: testNamespaceName}}, //nolint:goconst
 				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-2", Namespace: testNamespaceName}},
@@ -892,8 +944,12 @@ func TestMapSecretToRequests(t *testing.T) {
 			secret: &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{Name: "other-secret", Namespace: testNamespaceName},
 			},
-			referenced:     map[string]bool{secretName: true},
-			providerConfig: &fakeProviderConfigImpl{FakePollInterval: time.Hour},
+			referenced: map[string]bool{secretName: true},
+			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
+				FakePollInterval: time.Hour},
 			existingObjs: []client.Object{
 				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-1", Namespace: testNamespaceName}},
 			},
@@ -904,10 +960,14 @@ func TestMapSecretToRequests(t *testing.T) {
 			secret: &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: testNamespaceName},
 			},
-			referenced:     map[string]bool{secretName: true},
-			providerConfig: &fakeProviderConfigImpl{FakePollInterval: time.Hour},
-			existingObjs:   nil,
-			wantRequests:   0,
+			referenced: map[string]bool{secretName: true},
+			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
+				FakePollInterval: time.Hour},
+			existingObjs: nil,
+			wantRequests: 0,
 		},
 		{
 			name: "nil provider config does not panic",
@@ -924,6 +984,7 @@ func TestMapSecretToRequests(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			onboardingCluster := createFakeClusterWithUnstructuredList(t, "onboarding", tt.existingObjs)
+			platformCluster := createFakeCluster(t, "platform")
 
 			mockSW := &MockSecretWatchingReconciler{
 				referencedSecrets: tt.referenced,
@@ -931,10 +992,15 @@ func TestMapSecretToRequests(t *testing.T) {
 
 			r := &APIReconciler[*fakeApiImpl, *fakeProviderConfigImpl]{
 				emptyObj:          func() *fakeApiImpl { return &fakeApiImpl{} },
+				emptyConfig:       func() *fakeProviderConfigImpl { return &fakeProviderConfigImpl{} },
 				onboardingCluster: onboardingCluster,
+				platformCluster:   platformCluster,
 				reconciler:        mockSW,
 			}
-			r.providerConfig.Store(&tt.providerConfig)
+			if tt.providerConfig != nil {
+				r.providerName = tt.providerConfig.Name
+				require.NoError(t, platformCluster.Client().Create(context.TODO(), tt.providerConfig))
+			}
 
 			mapFn := r.mapSecretToRequests(mockSW)
 			reqs := mapFn(context.Background(), tt.secret)
@@ -1013,8 +1079,12 @@ func TestMapConfigMapToRequests(t *testing.T) {
 			configMap: &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: testNamespaceName},
 			},
-			referenced:     map[string]bool{configMapName: true},
-			providerConfig: &fakeProviderConfigImpl{FakePollInterval: time.Hour},
+			referenced: map[string]bool{configMapName: true},
+			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
+				FakePollInterval: time.Hour},
 			existingObjs: []client.Object{
 				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-1", Namespace: testNamespaceName}},
 				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-2", Namespace: testNamespaceName}},
@@ -1026,8 +1096,12 @@ func TestMapConfigMapToRequests(t *testing.T) {
 			configMap: &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{Name: "other-configmap", Namespace: testNamespaceName},
 			},
-			referenced:     map[string]bool{configMapName: true},
-			providerConfig: &fakeProviderConfigImpl{FakePollInterval: time.Hour},
+			referenced: map[string]bool{configMapName: true},
+			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
+				FakePollInterval: time.Hour},
 			existingObjs: []client.Object{
 				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-1", Namespace: testNamespaceName}},
 			},
@@ -1038,10 +1112,14 @@ func TestMapConfigMapToRequests(t *testing.T) {
 			configMap: &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: testNamespaceName},
 			},
-			referenced:     map[string]bool{configMapName: true},
-			providerConfig: &fakeProviderConfigImpl{FakePollInterval: time.Hour},
-			existingObjs:   nil,
-			wantRequests:   0,
+			referenced: map[string]bool{configMapName: true},
+			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
+				FakePollInterval: time.Hour},
+			existingObjs: nil,
+			wantRequests: 0,
 		},
 		{
 			name: "nil provider config does not panic",
@@ -1058,6 +1136,7 @@ func TestMapConfigMapToRequests(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			onboardingCluster := createFakeClusterWithUnstructuredList(t, "onboarding", tt.existingObjs)
+			platformCluster := createFakeCluster(t, "platform")
 
 			mockCW := &MockConfigMapWatchingReconciler{
 				referencedConfigMaps: tt.referenced,
@@ -1065,10 +1144,15 @@ func TestMapConfigMapToRequests(t *testing.T) {
 
 			r := &APIReconciler[*fakeApiImpl, *fakeProviderConfigImpl]{
 				emptyObj:          func() *fakeApiImpl { return &fakeApiImpl{} },
+				emptyConfig:       func() *fakeProviderConfigImpl { return &fakeProviderConfigImpl{} },
 				onboardingCluster: onboardingCluster,
+				platformCluster:   platformCluster,
 				reconciler:        mockCW,
 			}
-			r.providerConfig.Store(&tt.providerConfig)
+			if tt.providerConfig != nil {
+				r.providerName = tt.providerConfig.Name
+				require.NoError(t, platformCluster.Client().Create(context.TODO(), tt.providerConfig))
+			}
 
 			mapFn := r.mapConfigMapToRequests(mockCW)
 			reqs := mapFn(context.Background(), tt.configMap)
@@ -1085,4 +1169,23 @@ func TestMapConfigMapToRequests(t *testing.T) {
 			}
 		})
 	}
+}
+
+var _ Config = &fakeProviderConfigImpl{}
+
+type fakeProviderConfigImpl struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	FakePollInterval  time.Duration
+}
+
+func (f *fakeProviderConfigImpl) DeepCopyObject() runtime.Object {
+	return &fakeProviderConfigImpl{
+		ObjectMeta:       *f.DeepCopy(),
+		FakePollInterval: f.PollInterval(),
+	}
+}
+
+func (f *fakeProviderConfigImpl) PollInterval() time.Duration {
+	return f.FakePollInterval
 }
