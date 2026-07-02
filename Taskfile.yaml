@@ -25,22 +25,35 @@ tasks:
     cmds:
       - task: test:gen:code
       - task: test:gen:manifests
+      - task: test:gen:code
+        vars:
+          PATHS: ./test/config/...
+      - task: test:gen:manifests
+        vars:
+          PATHS: ./test/config/...
+          OUTPUT: ./test/config/crd/bases
 
   test:gen:code:
     desc: Generate deepcopy methods and CRDs for the test API
+    vars:
+      PATHS: '{{ .PATHS | default "./test/api/..."}}'
     deps:
       - gen:install
     cmds:
       - >
-        {{.CONTROLLER_GEN}} object paths=./test/api/...
+        {{.CONTROLLER_GEN}} object paths={{.PATHS}}
 
   test:gen:manifests:
     desc: Generate deepcopy methods and CRDs for the test API
+    vars:
+      PATHS: '{{ .PATHS | default "./test/api/..."}}'
+      OUTPUT: '{{ .OUTPUT | default "./test/api/crd/bases"}}'
     deps:
       - gen:install
     cmds:
+      - rm -rf {{.OUTPUT}}
       - >
-        {{.CONTROLLER_GEN}} crd:allowDangerousTypes=true paths=./test/api/... output:crd:artifacts:config=test/api/crd/bases
+        {{.CONTROLLER_GEN}} crd paths={{.PATHS}} output:crd:artifacts:config={{.OUTPUT}}
 
   envtest:install:
     desc: Install setup-envtest locally

@@ -27,12 +27,13 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/openmcp-project/controller-utils/pkg/clusters"
 	"github.com/openmcp-project/opencontrolplane-runtime/pkg/serviceprovider/clusteraccess"
-	"github.com/openmcp-project/opencontrolplane-runtime/test/api/v1alpha1"
+	apiv1alpha1 "github.com/openmcp-project/opencontrolplane-runtime/testdata/api/v1alpha1"
+	configv1alpha1 "github.com/openmcp-project/opencontrolplane-runtime/testdata/config/v1alpha1"
 	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
 	"github.com/openmcp-project/openmcp-operator/api/common"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -54,6 +55,8 @@ var (
 	platformClient   client.Client
 	platformCluster  *clusters.Cluster
 	onboardingClient client.Client
+	onboardingScheme *runtime.Scheme
+	platformScheme   *runtime.Scheme
 	reconciler       *MockFooReconciler
 )
 
@@ -69,7 +72,12 @@ var _ = BeforeSuite(func() {
 	ctx, cancel = context.WithCancel(context.TODO())
 
 	var err error
-	err = v1alpha1.AddToScheme(scheme.Scheme)
+	onboardingScheme = runtime.NewScheme()
+	err = apiv1alpha1.AddToScheme(onboardingScheme)
+	Expect(err).NotTo(HaveOccurred())
+
+	platformScheme = runtime.NewScheme()
+	err = configv1alpha1.AddToScheme(platformScheme)
 	Expect(err).NotTo(HaveOccurred())
 
 	// +kubebuilder:scaffold:scheme
@@ -79,7 +87,7 @@ var _ = BeforeSuite(func() {
 	createOnboardingEnv()
 
 	mgr, err := ctrl.NewManager(onboardingCfg, ctrl.Options{
-		Scheme: scheme.Scheme,
+		Scheme: onboardingScheme,
 	})
 	Expect(err).NotTo(HaveOccurred())
 
@@ -128,7 +136,7 @@ func getFirstFoundEnvTestBinaryDir() string {
 func createPlatformEnv() {
 	By("bootstrapping platform test environment")
 	platformEnv = &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "test", "api", "crd", "bases")},
+		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "testdata", "config", "crd", "bases")},
 		ErrorIfCRDPathMissing: true,
 		// AttachControlPlaneOutput: true,
 	}
@@ -144,7 +152,7 @@ func createPlatformEnv() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(platformCfg).NotTo(BeNil())
 
-	platformClient, err = client.New(platformCfg, client.Options{Scheme: scheme.Scheme})
+	platformClient, err = client.New(platformCfg, client.Options{Scheme: platformScheme})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(platformClient).NotTo(BeNil())
 }
@@ -152,7 +160,7 @@ func createPlatformEnv() {
 func createOnboardingEnv() {
 	By("bootstrapping onboarding test environment")
 	onboardingEnv = &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "test", "api", "crd", "bases")},
+		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "testdata", "api", "crd", "bases")},
 		ErrorIfCRDPathMissing: true,
 		// AttachControlPlaneOutput: true,
 	}
@@ -167,28 +175,28 @@ func createOnboardingEnv() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(onboardingCfg).NotTo(BeNil())
 
-	onboardingClient, err = client.New(onboardingCfg, client.Options{Scheme: scheme.Scheme})
+	onboardingClient, err = client.New(onboardingCfg, client.Options{Scheme: onboardingScheme})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(onboardingClient).NotTo(BeNil())
 }
 
-func fooReconciler() *APIReconciler[*v1alpha1.Foo, *v1alpha1.ProviderConfig] {
+func fooReconciler() *APIReconciler[*apiv1alpha1.Foo, *configv1alpha1.ProviderConfig] {
 	onboardingCluster := clusters.New("onboarding").WithRESTConfig(onboardingCfg)
-	if err := onboardingCluster.InitializeClient(scheme.Scheme); err != nil {
+	if err := onboardingCluster.InitializeClient(onboardingScheme); err != nil {
 		panic(err)
 	}
 	platformCluster = clusters.New("platform").WithRESTConfig(platformCfg)
-	if err := platformCluster.InitializeClient(scheme.Scheme); err != nil {
+	if err := platformCluster.InitializeClient(platformScheme); err != nil {
 		panic(err)
 	}
-	reconciler = &MockFooReconciler{config: v1alpha1.ProviderConfig{
-		Spec: v1alpha1.ProviderConfigSpec{
+	reconciler = &MockFooReconciler{config: configv1alpha1.ProviderConfig{
+		Spec: configv1alpha1.ProviderConfigSpec{
 			PollInterval: &metav1.Duration{Duration: time.Second},
 		},
 	}}
-	builder := NewAPIReconcilerBuilder[*v1alpha1.Foo, *v1alpha1.ProviderConfig]().
-		EmptyObjectProvider(func() *v1alpha1.Foo { return &v1alpha1.Foo{} }).
-		EmptyConfigProvider(func() *v1alpha1.ProviderConfig { return &v1alpha1.ProviderConfig{} }).
+	builder := NewAPIReconcilerBuilder[*apiv1alpha1.Foo, *configv1alpha1.ProviderConfig]().
+		EmptyObjectProvider(func() *apiv1alpha1.Foo { return &apiv1alpha1.Foo{} }).
+		EmptyConfigProvider(func() *configv1alpha1.ProviderConfig { return &configv1alpha1.ProviderConfig{} }).
 		OnboardingCluster(onboardingCluster).
 		PlatformCluster(platformCluster).
 		AdvancedClusterAccessReconciler(FakeAdvancedClusterAccessProvider{
@@ -214,19 +222,19 @@ func fooReconciler() *APIReconciler[*v1alpha1.Foo, *v1alpha1.ProviderConfig] {
 	return builder.MustBuild()
 }
 
-var _ Reconciler[*v1alpha1.Foo, *v1alpha1.ProviderConfig] = &MockFooReconciler{}
+var _ Reconciler[*apiv1alpha1.Foo, *configv1alpha1.ProviderConfig] = &MockFooReconciler{}
 
 type MockFooReconciler struct {
-	config v1alpha1.ProviderConfig
+	config configv1alpha1.ProviderConfig
 }
 
 // CreateOrUpdate implements [Reconciler].
-func (m *MockFooReconciler) CreateOrUpdate(ctx context.Context, obj *v1alpha1.Foo, config *v1alpha1.ProviderConfig, clusters clusteraccess.ClusterContext) (ctrl.Result, error) {
+func (m *MockFooReconciler) CreateOrUpdate(ctx context.Context, obj *apiv1alpha1.Foo, config *configv1alpha1.ProviderConfig, clusters clusteraccess.ClusterContext) (ctrl.Result, error) {
 	m.config = *config
 	return ctrl.Result{RequeueAfter: time.Hour}, nil
 }
 
 // Delete implements [Reconciler].
-func (m *MockFooReconciler) Delete(ctx context.Context, obj *v1alpha1.Foo, config *v1alpha1.ProviderConfig, clusters clusteraccess.ClusterContext) (ctrl.Result, error) {
+func (m *MockFooReconciler) Delete(ctx context.Context, obj *apiv1alpha1.Foo, config *configv1alpha1.ProviderConfig, clusters clusteraccess.ClusterContext) (ctrl.Result, error) {
 	return ctrl.Result{}, nil
 }

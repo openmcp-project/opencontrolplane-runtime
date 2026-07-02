@@ -22,7 +22,8 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/openmcp-project/opencontrolplane-runtime/test/api/v1alpha1"
+	apiv1alpha1 "github.com/openmcp-project/opencontrolplane-runtime/testdata/api/v1alpha1"
+	configv1alpha1 "github.com/openmcp-project/opencontrolplane-runtime/testdata/config/v1alpha1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -38,13 +39,13 @@ var _ = Describe("Foo Controller", func() {
 		typeNamespacedName := types.NamespacedName{
 			Name: "foo",
 		}
-		providerConfig := &v1alpha1.ProviderConfig{}
+		providerConfig := &configv1alpha1.ProviderConfig{}
 
 		BeforeEach(func() {
 			By("create provider config instance foo")
 			err := platformClient.Get(ctx, typeNamespacedName, providerConfig)
 			if err != nil && errors.IsNotFound(err) {
-				config := &v1alpha1.ProviderConfig{
+				config := &configv1alpha1.ProviderConfig{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "foo",
 					},
@@ -55,7 +56,7 @@ var _ = Describe("Foo Controller", func() {
 
 		AfterEach(func() {
 			// TODO(user): Cleanup logic after each test, like removing the config instance.
-			config := &v1alpha1.ProviderConfig{
+			config := &configv1alpha1.ProviderConfig{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "foo",
 				},
@@ -68,7 +69,7 @@ var _ = Describe("Foo Controller", func() {
 		})
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
-			foo := &v1alpha1.Foo{
+			foo := &apiv1alpha1.Foo{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      resourceName,
 					Namespace: "default",
@@ -81,7 +82,7 @@ var _ = Describe("Foo Controller", func() {
 		})
 		It("should receive a reconcile request when the provider config changes", func() {
 			By("Reconciling the existing resource")
-			config := &v1alpha1.ProviderConfig{
+			config := &configv1alpha1.ProviderConfig{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "foo",
 				},
