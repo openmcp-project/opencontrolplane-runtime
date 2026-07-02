@@ -225,11 +225,13 @@ func fooReconciler() *APIReconciler[*apiv1alpha1.Foo, *configv1alpha1.ProviderCo
 var _ Reconciler[*apiv1alpha1.Foo, *configv1alpha1.ProviderConfig] = &MockFooReconciler{}
 
 type MockFooReconciler struct {
-	config configv1alpha1.ProviderConfig
+	createOrUpdateCalled bool
+	config               configv1alpha1.ProviderConfig
 }
 
 // CreateOrUpdate implements [Reconciler].
 func (m *MockFooReconciler) CreateOrUpdate(ctx context.Context, obj *apiv1alpha1.Foo, config *configv1alpha1.ProviderConfig, clusters clusteraccess.ClusterContext) (ctrl.Result, error) {
+	m.createOrUpdateCalled = true
 	m.config = *config
 	return ctrl.Result{RequeueAfter: time.Hour}, nil
 }

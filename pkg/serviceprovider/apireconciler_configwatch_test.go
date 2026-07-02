@@ -33,17 +33,13 @@ import (
 var _ = Describe("Foo Controller", func() {
 	Context("When reconciling a resource", func() {
 		const resourceName = "test-resource"
-
 		ctx := context.Background()
-
-		typeNamespacedName := types.NamespacedName{
-			Name: "foo",
-		}
+		providerConfigKey := types.NamespacedName{Name: "foo"}
 		providerConfig := &configv1alpha1.ProviderConfig{}
 
 		BeforeEach(func() {
-			By("create provider config instance foo")
-			err := platformClient.Get(ctx, typeNamespacedName, providerConfig)
+			By("create a provider config if not found")
+			err := platformClient.Get(ctx, providerConfigKey, providerConfig)
 			if err != nil && errors.IsNotFound(err) {
 				config := &configv1alpha1.ProviderConfig{
 					ObjectMeta: metav1.ObjectMeta{
@@ -52,22 +48,11 @@ var _ = Describe("Foo Controller", func() {
 				}
 				Expect(platformClient.Create(ctx, config)).To(Succeed())
 			}
+			// reset mock flag
+			reconciler.createOrUpdateCalled = false
 		})
 
-		AfterEach(func() {
-			// TODO(user): Cleanup logic after each test, like removing the config instance.
-			config := &configv1alpha1.ProviderConfig{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "foo",
-				},
-			}
-			err := platformClient.Get(ctx, typeNamespacedName, config)
-			Expect(err).NotTo(HaveOccurred())
-
-			By("Cleanup provider config instance foo")
-			Expect(platformClient.Delete(ctx, config)).To(Succeed())
-		})
-		It("should successfully reconcile the resource", func() {
+		It("should successfully reconcile Foo", func() {
 			By("Reconciling the created resource")
 			foo := &apiv1alpha1.Foo{
 				ObjectMeta: metav1.ObjectMeta{
@@ -76,10 +61,11 @@ var _ = Describe("Foo Controller", func() {
 				},
 			}
 			Expect(onboardingClient.Create(ctx, foo)).To(Succeed())
-			Eventually(func() time.Duration {
-				return reconciler.config.PollInterval()
-			}).Should(Equal(time.Minute))
+			Eventually(func() bool { return reconciler.createOrUpdateCalled }).Should(BeTrue())
+			// verify poll interval default is applied on initial create
+			Eventually(func() time.Duration { return reconciler.config.PollInterval() }).Should(Equal(time.Minute))
 		})
+
 		It("should receive a reconcile request when the provider config changes", func() {
 			By("Reconciling the existing resource")
 			config := &configv1alpha1.ProviderConfig{
@@ -87,12 +73,12 @@ var _ = Describe("Foo Controller", func() {
 					Name: "foo",
 				},
 			}
-			Expect(platformClient.Get(ctx, typeNamespacedName, config)).To(Succeed())
+			Expect(platformClient.Get(ctx, providerConfigKey, config)).To(Succeed())
 			config.Spec.PollInterval = &metav1.Duration{Duration: time.Hour}
 			Expect(platformClient.Update(ctx, config)).To(Succeed())
-			Eventually(func() time.Duration {
-				return reconciler.config.PollInterval()
-			}).Should(Equal(time.Hour))
+			Eventually(func() bool { return reconciler.createOrUpdateCalled }).Should(BeTrue())
+			// verify a reconcile request has been created by matching the updated poll interval
+			Eventually(func() time.Duration { return reconciler.config.PollInterval() }).Should(Equal(time.Hour))
 		})
 	})
 })
