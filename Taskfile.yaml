@@ -27,16 +27,16 @@ tasks:
       - task: test:gen:manifests
       - task: test:gen:code
         vars:
-          PATHS: ./test/config/...
+          PATHS: ./testdata/config/...
       - task: test:gen:manifests
         vars:
-          PATHS: ./test/config/...
-          OUTPUT: ./test/config/crd/bases
+          PATHS: ./testdata/config/...
+          OUTPUT: ./testdata/config/crd/bases
 
   test:gen:code:
     desc: Generate deepcopy methods and CRDs for the test API
     vars:
-      PATHS: '{{ .PATHS | default "./test/api/..."}}'
+      PATHS: '{{ .PATHS | default "./testdata/api/..."}}'
     deps:
       - gen:install
     cmds:
@@ -46,8 +46,8 @@ tasks:
   test:gen:manifests:
     desc: Generate deepcopy methods and CRDs for the test API
     vars:
-      PATHS: '{{ .PATHS | default "./test/api/..."}}'
-      OUTPUT: '{{ .OUTPUT | default "./test/api/crd/bases"}}'
+      PATHS: '{{ .PATHS | default "./testdata/api/..."}}'
+      OUTPUT: '{{ .OUTPUT | default "./testdata/api/crd/bases"}}'
     deps:
       - gen:install
     cmds:
