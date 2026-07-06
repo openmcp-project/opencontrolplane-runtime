@@ -367,7 +367,7 @@ func (r *APIReconciler[T, C]) clusters(ctx context.Context, req ctrl.Request, ad
 // SetupWithManager sets up the controller with the Manager.
 func (r *APIReconciler[T, C]) SetupWithManager(mgr ctrl.Manager, providerName string) error {
 	if providerName == "" {
-		panic("provider name is required for manager setup")
+		return errors.New("provider name is required for manager setup")
 	}
 	r.providerName = providerName
 	controller := ctrl.NewControllerManagedBy(mgr).
