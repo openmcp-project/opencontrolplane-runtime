@@ -1198,13 +1198,6 @@ func (f *fakeProviderConfigImpl) PollInterval() time.Duration {
 
 // tests the provider config watch
 var _ = Describe("API Reconciler", func() {
-	AfterEach(func() {
-		// reset mock
-		reconciler.createOrUpdateCalled = false
-		reconciler.deleteCalled = false
-		reconciler.config = configv1alpha1.ProviderConfig{}
-	})
-
 	Context("When a ProviderConfig and a Foo resource exists", func() {
 		const resourceName = "test-resource"
 		ctx := context.Background()
@@ -1230,7 +1223,8 @@ var _ = Describe("API Reconciler", func() {
 
 		It("The Foo resource should get ready", func() {
 			By("Reconciling the created resource")
-			Eventually(func() bool { return reconciler.createOrUpdateCalled }).Should(BeTrueBecause("APIReconciler invoked CreateOrUpdate of mock"))
+			// verify poll interval default is applied on initial create
+			Eventually(reconciler.createOrUpdateConfig).Should(Receive(HaveField("Spec.PollInterval.Duration", time.Minute)))
 			Eventually(func() apiv1alpha1.FooStatus {
 				foo := &apiv1alpha1.Foo{}
 				foo.SetName(fooKey.Name)
@@ -1238,8 +1232,9 @@ var _ = Describe("API Reconciler", func() {
 				Expect(onboardingClient.Get(ctx, fooKey, foo)).To(Succeed())
 				return foo.Status
 			}).Should(HaveField("Phase", Equal("Ready")))
-			// verify poll interval default is applied on initial create
-			Eventually(func() time.Duration { return reconciler.config.PollInterval() }).Should(Equal(time.Minute))
+			// consume the finalizer/status update reconcile request to have a quiet update channel for the following test.
+			// depending on reconciliation timing, the provider config update could otherwise be picked up by during the reconcile request caused by the primary watch.
+			Eventually(reconciler.createOrUpdateConfig).Should(Receive())
 		})
 
 		It("The Foo resource is reconciled when the provider config changes", func() {
@@ -1249,9 +1244,8 @@ var _ = Describe("API Reconciler", func() {
 			Expect(platformClient.Get(ctx, configKey, config)).To(Succeed())
 			config.Spec.PollInterval = &metav1.Duration{Duration: time.Hour}
 			Expect(platformClient.Update(ctx, config)).To(Succeed())
-			Eventually(func() bool { return reconciler.createOrUpdateCalled }).Should(BeTrueBecause("update results in reconcile request"))
 			// verify poll interval matches the updated provider config
-			Eventually(func() time.Duration { return reconciler.config.PollInterval() }).Should(Equal(time.Hour))
+			Eventually(reconciler.createOrUpdateConfig).Should(Receive(HaveField("Spec.PollInterval.Duration", time.Hour)))
 		})
 	})
 })

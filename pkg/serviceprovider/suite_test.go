@@ -185,11 +185,10 @@ func fooReconciler() *APIReconciler[*apiv1alpha1.Foo, *configv1alpha1.ProviderCo
 	if err := platformCluster.InitializeClient(platformScheme); err != nil {
 		panic(err)
 	}
-	reconciler = &MockFooReconciler{config: configv1alpha1.ProviderConfig{
-		Spec: configv1alpha1.ProviderConfigSpec{
-			PollInterval: &metav1.Duration{Duration: time.Second},
-		},
-	}}
+	reconciler = &MockFooReconciler{
+		createOrUpdateConfig: make(chan configv1alpha1.ProviderConfig),
+		deleteConfig:         make(chan configv1alpha1.ProviderConfig),
+	}
 	builder := NewAPIReconcilerBuilder[*apiv1alpha1.Foo, *configv1alpha1.ProviderConfig]().
 		EmptyObjectProvider(func() *apiv1alpha1.Foo { return &apiv1alpha1.Foo{} }).
 		EmptyConfigProvider(func() *configv1alpha1.ProviderConfig { return &configv1alpha1.ProviderConfig{} }).
@@ -221,23 +220,20 @@ func fooReconciler() *APIReconciler[*apiv1alpha1.Foo, *configv1alpha1.ProviderCo
 var _ Reconciler[*apiv1alpha1.Foo, *configv1alpha1.ProviderConfig] = &MockFooReconciler{}
 
 type MockFooReconciler struct {
-	createOrUpdateCalled bool
-	deleteCalled         bool
-	config               configv1alpha1.ProviderConfig
+	createOrUpdateConfig chan configv1alpha1.ProviderConfig
+	deleteConfig         chan configv1alpha1.ProviderConfig
 }
 
 // CreateOrUpdate implements [Reconciler].
 func (m *MockFooReconciler) CreateOrUpdate(ctx context.Context, obj *apiv1alpha1.Foo, config *configv1alpha1.ProviderConfig, clusters clusteraccess.ClusterContext) (ctrl.Result, error) {
-	m.createOrUpdateCalled = true
-	m.config = *config
+	m.createOrUpdateConfig <- *config
 	StatusReady(obj)
 	return ctrl.Result{RequeueAfter: time.Hour}, nil
 }
 
 // Delete implements [Reconciler].
 func (m *MockFooReconciler) Delete(ctx context.Context, obj *apiv1alpha1.Foo, config *configv1alpha1.ProviderConfig, clusters clusteraccess.ClusterContext) (ctrl.Result, error) {
-	m.deleteCalled = true
-	m.config = *config
+	m.deleteConfig <- *config
 	StatusTerminating(obj)
 	return ctrl.Result{}, nil
 }
