@@ -3,7 +3,6 @@ package serviceprovider
 import (
 	"context"
 	"errors"
-	"sync/atomic"
 
 	"github.com/openmcp-project/controller-utils/pkg/clusters"
 	controllerutil2 "github.com/openmcp-project/controller-utils/pkg/controller"
@@ -18,7 +17,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -37,8 +35,6 @@ type APIReconciler[T API, C Config] struct {
 	clusterAccessProvider clusteraccess.AdvancedProvider
 	// reconciler reconciles the end-user facing onboarding API of a service provider
 	reconciler Reconciler[T, C]
-	// providerConfig represents the platform operator facing platform API of a service provider
-	providerConfig atomic.Pointer[C]
 	// withWorkloadCluster defines whether a service provider requires access to a workload cluster
 	withWorkloadCluster bool
 	// secretNamespace is the namespace to watch secrets in on the platform cluster. Used only if the ServiceProviderReconciler also implements SecretWatcher.
@@ -50,6 +46,10 @@ type APIReconciler[T API, C Config] struct {
 	// additionalDataGenerators is an optional list of functions which are called during reconciliation.
 	// Their outputs are collected and forwarded as additionalData to only the advanced cluster access reconciler.
 	additionalDataGenerators []func(ctx context.Context, obj T, config C) (any, error)
+	// providerName
+	providerName string
+	// emptyConfig creates an empty object of the config type
+	emptyConfig func() C
 }
 
 // APIReconcilerBuilder enables building valid APIReconcilers.
@@ -73,6 +73,9 @@ func (b *APIReconcilerBuilder[T, C]) MustBuild() *APIReconciler[T, C] {
 	if b.apiReconciler.emptyObj == nil {
 		panic("empty object provider is required")
 	}
+	if b.apiReconciler.emptyConfig == nil {
+		panic("empty config provider is required")
+	}
 	if b.apiReconciler.onboardingCluster == nil {
 		panic("onboarding cluster is required")
 	}
@@ -88,6 +91,12 @@ func (b *APIReconcilerBuilder[T, C]) MustBuild() *APIReconciler[T, C] {
 // EmptyObjectProvider sets the empty object function required for concrete type processing.
 func (b *APIReconcilerBuilder[T, C]) EmptyObjectProvider(emptyObj func() T) *APIReconcilerBuilder[T, C] {
 	b.apiReconciler.emptyObj = emptyObj
+	return b
+}
+
+// EmptyConfigProvider sets the empty object function required for concrete type processing.
+func (b *APIReconcilerBuilder[T, C]) EmptyConfigProvider(emptyConfig func() C) *APIReconcilerBuilder[T, C] {
+	b.apiReconciler.emptyConfig = emptyConfig
 	return b
 }
 
@@ -149,12 +158,6 @@ func (b *APIReconcilerBuilder[T, C]) AdditionalDataGenerators(generators ...func
 	return b
 }
 
-// ProviderConfig sets the provider config.
-func (b *APIReconcilerBuilder[T, C]) ProviderConfig(config C) *APIReconcilerBuilder[T, C] {
-	b.apiReconciler.providerConfig.Store(&config)
-	return b
-}
-
 // Reconcile orchestrates platform and (domain specific) Reconciler logic to reconcile API objects
 func (r *APIReconciler[T, C]) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, reconcileErr error) {
 	l := logf.FromContext(ctx)
@@ -176,12 +179,20 @@ func (r *APIReconciler[T, C]) Reconcile(ctx context.Context, req ctrl.Request) (
 			reconcileErr = errors.Join(reconcileErr, err)
 		}
 	}()
-	providerConfig := r.providerConfig.Load()
-	if providerConfig == nil {
-		StatusProgressing(obj, reasonReconcileError, "No ProviderConfig found")
-		return ctrl.Result{}, errors.New("provider config missing")
+	providerConfig := r.emptyConfig()
+	providerConfig.SetName(r.providerName)
+	if err := r.platformCluster.Client().Get(ctx, client.ObjectKeyFromObject(providerConfig), providerConfig); err != nil {
+		if apierrors.IsNotFound(err) {
+			StatusProgressing(obj, reasonReconcileError, "No ProviderConfig found")
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, err
 	}
-	providerConfigCopy := (*providerConfig).DeepCopyObject().(C)
+	if !providerConfig.GetDeletionTimestamp().IsZero() {
+		StatusProgressing(obj, reasonReconcileError, "ProviderConfig is marked for deletion")
+		return ctrl.Result{}, nil
+	}
+	providerConfigCopy := providerConfig.DeepCopyObject().(C)
 	// generate additional data
 	additionalData, err := r.generateAdditionalData(ctx, obj, providerConfigCopy)
 	if err != nil {
@@ -354,27 +365,20 @@ func (r *APIReconciler[T, C]) clusters(ctx context.Context, req ctrl.Request, ad
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *APIReconciler[T, C]) SetupWithManager(mgr ctrl.Manager, name string, providerConfigUpdates chan event.GenericEvent) error {
+func (r *APIReconciler[T, C]) SetupWithManager(mgr ctrl.Manager, providerName string) error {
+	if providerName == "" {
+		return errors.New("provider name is required for manager setup")
+	}
+	r.providerName = providerName
 	controller := ctrl.NewControllerManagedBy(mgr).
 		For(r.emptyObj()).
-		// sets up reconciles whenever provider config controller sends update events
-		WatchesRawSource(
-			source.Channel(
-				providerConfigUpdates,
-				handler.EnqueueRequestsFromMapFunc(
-					func(ctx context.Context, obj client.Object) []reconcile.Request {
-						// update cached provider config
-						if obj != nil {
-							c := obj.DeepCopyObject().(C)
-							r.providerConfig.Store(&c)
-						} else {
-							r.providerConfig.Store(nil)
-						}
-						// reconcile all existing objects
-						return r.enqueueAllObjects(ctx)
-					},
-				)),
-		)
+		// add provider config watch
+		WatchesRawSource(source.Kind(
+			r.platformCluster.Cluster().GetCache(),
+			r.emptyConfig(),
+			handler.TypedEnqueueRequestsFromMapFunc(r.mapProviderConfigToRequests()),
+			controllerutil2.ToTypedPredicate[C](controllerutil2.ExactNamePredicate(providerName, "")),
+		))
 
 	// Optional: watch secrets on the platform cluster if the reconciler implements SecretWatcher
 	if sw, ok := r.reconciler.(SecretWatcher[C]); ok && r.secretNamespace != "" {
@@ -408,18 +412,19 @@ func (r *APIReconciler[T, C]) SetupWithManager(mgr ctrl.Manager, name string, pr
 		)
 	}
 
-	return controller.Named(name).Complete(r)
+	return controller.Named(providerName).Complete(r)
 }
 
 // mapSecretToRequests returns a typed map function that checks whether a changed secret
 // is referenced by the service provider and, if so, enqueues all ServiceProviderAPI objects.
 func (r *APIReconciler[T, C]) mapSecretToRequests(sw SecretWatcher[C]) func(ctx context.Context, secret *corev1.Secret) []reconcile.Request {
 	return func(ctx context.Context, secret *corev1.Secret) []reconcile.Request {
-		var pcVal C
-		if pc := r.providerConfig.Load(); pc != nil {
-			pcVal = *pc
+		providerConfig := r.emptyConfig()
+		providerConfig.SetName(r.providerName)
+		if err := r.platformCluster.Client().Get(ctx, client.ObjectKeyFromObject(providerConfig), providerConfig); err != nil {
+			return nil
 		}
-		if !sw.IsReferencedSecret(ctx, secret, pcVal) {
+		if !sw.IsReferencedSecret(ctx, secret, providerConfig) {
 			return nil
 		}
 		return r.enqueueAllObjects(ctx)
@@ -430,13 +435,20 @@ func (r *APIReconciler[T, C]) mapSecretToRequests(sw SecretWatcher[C]) func(ctx 
 // is referenced by the service provider and, if so, enqueues all ServiceProviderAPI objects.
 func (r *APIReconciler[T, C]) mapConfigMapToRequests(cw ConfigMapWatcher[C]) func(ctx context.Context, configMap *corev1.ConfigMap) []reconcile.Request {
 	return func(ctx context.Context, configMap *corev1.ConfigMap) []reconcile.Request {
-		var pcVal C
-		if pc := r.providerConfig.Load(); pc != nil {
-			pcVal = *pc
-		}
-		if !cw.IsReferencedConfigMap(ctx, configMap, pcVal) {
+		providerConfig := r.emptyConfig()
+		providerConfig.SetName(r.providerName)
+		if err := r.platformCluster.Client().Get(ctx, client.ObjectKeyFromObject(providerConfig), providerConfig); err != nil {
 			return nil
 		}
+		if !cw.IsReferencedConfigMap(ctx, configMap, providerConfig) {
+			return nil
+		}
+		return r.enqueueAllObjects(ctx)
+	}
+}
+
+func (r *APIReconciler[T, C]) mapProviderConfigToRequests() func(ctx context.Context, _ C) []reconcile.Request {
+	return func(ctx context.Context, _ C) []reconcile.Request {
 		return r.enqueueAllObjects(ctx)
 	}
 }

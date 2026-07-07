@@ -2,6 +2,15 @@
 
 `opencontrolplane-runtime` is a shared Go library for building OpenControlPlane `ServiceProviders`, `PlatformServices` and `ClusterProvider`.
 
+## Development
+
+This project uses [task](https://taskfile.dev/) to generate test data and configure [envtest](https://sigs.k8s.io/controller-runtime/tools/setup-envtest). Execute the following two tasks to run the test suite:
+
+1. `task test:generate` to generate the test manifests with [controller-gen](https://sigs.k8s.io/controller-tools/cmd/controller-gen).
+2. `task envtest:setup` to configure envtest.
+
+Then execute the test suite with `go test ./...`.
+
 ## Support, Feedback, Contributing
 
 This project is open to feature requests/suggestions, bug reports etc. via [GitHub issues](https://github.com/openmcp-project/opencontrolplane-runtime/issues). Contribution and feedback are encouraged and always welcome. For more information about how to contribute, the project structure, as well as additional contribution information, see our [Contribution Guidelines](https://github.com/openmcp-project/.github/blob/main/CONTRIBUTING.md).
