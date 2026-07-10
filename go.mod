@@ -1,13 +1,13 @@
 module github.com/openmcp-project/opencontrolplane-runtime
 
-go 1.26.4
+go 1.26.5
 
 require (
 	github.com/go-logr/zapr v1.3.0
 	github.com/onsi/ginkgo/v2 v2.32.0
 	github.com/onsi/gomega v1.42.1
 	github.com/openmcp-project/controller-utils v0.30.0
-	github.com/openmcp-project/openmcp-operator/api v1.1.0
+	github.com/openmcp-project/openmcp-operator/api v1.2.0
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/zap v1.28.0
 	k8s.io/api v0.36.2
