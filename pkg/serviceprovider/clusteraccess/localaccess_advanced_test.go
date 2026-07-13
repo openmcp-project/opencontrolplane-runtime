@@ -62,7 +62,7 @@ func Test_advancedLocalAccessProvider_MCPCluster(t *testing.T) {
 				clusters:       map[string]*clusters.Cluster{mcpID: tt.cluster},
 				accessRequests: map[string]*clustersv1alpha1.AccessRequest{mcpID: tt.ar},
 			}
-			localAccessProvider := NewLocalAdvancedClusterAccessReconciler(fakeProvider)
+			localAccessProvider := NewLocalAdvancedClusterAccessReconciler(fakeProvider, false)
 			got, gotErr := localAccessProvider.Access(context.Background(), reconcile.Request{}, mcpID)
 			if gotErr != nil {
 				if !tt.wantErr {
@@ -120,7 +120,7 @@ func Test_advancedLocalAccessProvider_WorkloadCluster(t *testing.T) {
 				clusters:       map[string]*clusters.Cluster{workloadID: tt.cluster},
 				accessRequests: map[string]*clustersv1alpha1.AccessRequest{workloadID: tt.ar},
 			}
-			localAccessProvider := NewLocalAdvancedClusterAccessReconciler(fakeProvider)
+			localAccessProvider := NewLocalAdvancedClusterAccessReconciler(fakeProvider, false)
 			got, gotErr := localAccessProvider.Access(context.Background(), reconcile.Request{}, workloadID)
 			if gotErr != nil {
 				if !tt.wantErr {
@@ -215,10 +215,7 @@ func Test_advancedLocalAccessProvider_WithWorkloadCluster(t *testing.T) {
 				accessRequests:   map[string]*clustersv1alpha1.AccessRequest{mcpID: tt.ar},
 				clusterResources: map[string]*clustersv1alpha1.Cluster{mcpID: tt.mcpCluster},
 			}
-			provider := NewLocalAdvancedClusterAccessReconciler(fakeProvider)
-			if tt.withWorkload {
-				provider.WithWorkloadCluster()
-			}
+			provider := NewLocalAdvancedClusterAccessReconciler(fakeProvider, tt.withWorkload)
 			got, err := provider.Access(context.Background(), reconcile.Request{}, mcpID)
 			if tt.wantErr {
 				assert.Error(t, err)

@@ -22,16 +22,12 @@ type localAdvancedClusterAccessReconciler struct {
 }
 
 // NewLocalAdvancedClusterAccessReconciler returns a local advanced cluster access reconciler that wraps the given advanced cluster access reconciler.
-func NewLocalAdvancedClusterAccessReconciler(car advanced.ClusterAccessReconciler) *localAdvancedClusterAccessReconciler {
+// Set withWorkload to true when the service provider deploys to a workload cluster
+func NewLocalAdvancedClusterAccessReconciler(car advanced.ClusterAccessReconciler, withWorkload bool) advanced.ClusterAccessReconciler {
 	return &localAdvancedClusterAccessReconciler{
 		ClusterAccessReconciler: car,
+		withWorkload:            withWorkload,
 	}
-}
-
-// WithWorkloadCluster enables patching of the MCP RESTConfig.Host with the "apiserver-internal" endpoint address.
-func (s *localAdvancedClusterAccessReconciler) WithWorkloadCluster() *localAdvancedClusterAccessReconciler {
-	s.withWorkload = true
-	return s
 }
 
 // Access implements [advanced.ClusterAccessReconciler].
