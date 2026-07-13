@@ -71,11 +71,6 @@ func (a *simpleProviderAdapter) Access(ctx context.Context, request reconcile.Re
 	}
 }
 
-// Cluster implements [AdvancedProvider]. The legacy Provider has no access to the platform Cluster CR.
-func (a *simpleProviderAdapter) Cluster(_ context.Context, _ reconcile.Request, _ string, _ ...any) (*clustersv1alpha1.Cluster, error) {
-	return nil, nil
-}
-
 // AccessRequest implements [AdvancedProvider].
 func (a *simpleProviderAdapter) AccessRequest(ctx context.Context, request reconcile.Request, id string, _ ...any) (*clustersv1alpha1.AccessRequest, error) {
 	switch id {
@@ -86,6 +81,11 @@ func (a *simpleProviderAdapter) AccessRequest(ctx context.Context, request recon
 	default:
 		return nil, fmt.Errorf("unsupported cluster id: %s", id)
 	}
+}
+
+// Cluster implements [AdvancedProvider].
+func (a *simpleProviderAdapter) Cluster(_ context.Context, _ reconcile.Request, _ string, _ ...any) (*clustersv1alpha1.Cluster, error) {
+	return nil, nil
 }
 
 // Reconcile implements [AdvancedProvider].
