@@ -28,8 +28,7 @@ func NewLocalAdvancedClusterAccessReconciler(car advanced.ClusterAccessReconcile
 	}
 }
 
-// WithWorkloadCluster configures the reconciler to additionally patch the MCP RESTConfig.Host with the
-// "apiserver-internal" endpoint address, suitable for injection into pod env vars via the service provider.
+// WithWorkloadCluster enables patching of the MCP RESTConfig.Host with the "apiserver-internal" endpoint address.
 func (s *localAdvancedClusterAccessReconciler) WithWorkloadCluster() *localAdvancedClusterAccessReconciler {
 	s.withWorkload = true
 	return s
@@ -58,11 +57,11 @@ func (s *localAdvancedClusterAccessReconciler) Access(ctx context.Context, reque
 			return cluster, err
 		}
 		if mcpCluster == nil {
-			return cluster, fmt.Errorf("MCP cluster not found")
+			return cluster, fmt.Errorf("mcp cluster not found")
 		}
 		internalURL, ok := mcpCluster.Status.Endpoints.Get(clustersv1alpha1.APISERVER_ENDPOINT_INTERNAL)
 		if !ok {
-			return nil, fmt.Errorf("%s endpoint not found", clustersv1alpha1.APISERVER_ENDPOINT_INTERNAL)
+			return cluster, fmt.Errorf("%s endpoint not found", clustersv1alpha1.APISERVER_ENDPOINT_INTERNAL)
 		}
 		cfg := *cluster.RESTConfig()
 		cfg.Host = internalURL

@@ -467,6 +467,11 @@ type FakeAdvancedClusterAccessProvider struct {
 	accessRequests map[string]*clustersv1alpha1.AccessRequest
 }
 
+// Cluster implements [AdvancedClusterAccessProvider].
+func (f FakeAdvancedClusterAccessProvider) Cluster(_ context.Context, _ reconcile.Request, _ string, _ ...any) (*clustersv1alpha1.Cluster, error) {
+	return nil, nil
+}
+
 // Access implements [AdvancedClusterAccessProvider].
 func (f FakeAdvancedClusterAccessProvider) Access(_ context.Context, _ reconcile.Request, id string, _ ...any) (*clusters.Cluster, error) {
 	return f.clusters[id], nil
