@@ -71,6 +71,11 @@ func (a *simpleProviderAdapter) Access(ctx context.Context, request reconcile.Re
 	}
 }
 
+// Cluster implements [AdvancedProvider]. The legacy Provider has no access to the platform Cluster CR.
+func (a *simpleProviderAdapter) Cluster(_ context.Context, _ reconcile.Request, _ string, _ ...any) (*clustersv1alpha1.Cluster, error) {
+	return nil, nil
+}
+
 // AccessRequest implements [AdvancedProvider].
 func (a *simpleProviderAdapter) AccessRequest(ctx context.Context, request reconcile.Request, id string, _ ...any) (*clustersv1alpha1.AccessRequest, error) {
 	switch id {
@@ -98,6 +103,10 @@ type AdvancedProvider interface {
 	// Access returns an internal Cluster object granting access to the cluster for the specified request with the specified id.
 	// Will fail if the cluster is not registered or no AccessRequest is registered for the cluster, or if some other error occurs.
 	Access(ctx context.Context, request reconcile.Request, id string, additionalData ...any) (*clusters.Cluster, error)
+	// Cluster fetches the external Cluster object for the cluster for the specified request with the specified id.
+	// Will fail if the cluster is not registered or no Cluster can be determined, or if some other error occurs.
+	// The same additionalData must be passed into all methods of this ClusterAccessReconciler for the same request and id.
+	Cluster(ctx context.Context, request reconcile.Request, id string, additionalData ...any) (*clustersv1alpha1.Cluster, error)
 	// AccessRequest fetches the AccessRequest object for the cluster for the specified request with the specified id.
 	// Will fail if the cluster is not registered or no AccessRequest is registered for the cluster, or if some other error occurs.
 	// The same additionalData must be passed into all methods of this ClusterAccessReconciler for the same request and id.
