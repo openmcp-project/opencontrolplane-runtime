@@ -60,14 +60,14 @@ func (s *localAdvancedClusterAccessReconciler) Access(ctx context.Context, reque
 	// If we would not override it the rest.Config.Host would point to localhost.
 	// Warning: This does not affect the cluster client as we only initialize it in MustPatchClusterClient. As a result the rest.Config points to a different host than the cluster client!
 	if id == MCPClusterID && s.withWorkloadCluster && cluster.HasRESTConfig() {
-		mcpCluster, err := s.Cluster(ctx, request, id, additionalData...)
+		controlPlaneCluster, err := s.Cluster(ctx, request, id, additionalData...)
 		if err != nil {
 			return cluster, err
 		}
-		if mcpCluster == nil {
-			return cluster, fmt.Errorf("mcp cluster not found")
+		if controlPlaneCluster == nil {
+			return cluster, fmt.Errorf("ControlPlane cluster not found")
 		}
-		internalURL, ok := mcpCluster.Status.Endpoints.Get(clustersv1alpha1.APISERVER_ENDPOINT_INTERNAL)
+		internalURL, ok := controlPlaneCluster.Status.Endpoints.Get(clustersv1alpha1.APISERVER_ENDPOINT_INTERNAL)
 		if !ok {
 			return cluster, fmt.Errorf("%s endpoint not found", clustersv1alpha1.APISERVER_ENDPOINT_INTERNAL)
 		}
