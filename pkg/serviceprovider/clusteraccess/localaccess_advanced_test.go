@@ -16,11 +16,11 @@ import (
 )
 
 const (
-	mcpID      = "mcp"
-	workloadID = "workload"
+	controlPlaneID = "mcp"
+	workloadID     = "workload"
 )
 
-func Test_advancedLocalAccessProvider_MCPCluster(t *testing.T) {
+func Test_advancedLocalAccessProvider_ControlPlaneCluster(t *testing.T) {
 	tests := []struct {
 		name     string
 		ar       *clustersv1alpha1.AccessRequest
@@ -32,7 +32,7 @@ func Test_advancedLocalAccessProvider_MCPCluster(t *testing.T) {
 			name: "local annotation results in local client config",
 			ar: &clustersv1alpha1.AccessRequest{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "mcp-access",
+					Name:      "control-plane-access",
 					Namespace: metav1.NamespaceDefault,
 					Annotations: map[string]string{
 						clusterprovider.LocalAccessAnnotation: localAPIServer,
@@ -47,7 +47,7 @@ func Test_advancedLocalAccessProvider_MCPCluster(t *testing.T) {
 			name: "no local annotation results in original cluster client config",
 			ar: &clustersv1alpha1.AccessRequest{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "mcp-access",
+					Name:      "control-plane-access",
 					Namespace: metav1.NamespaceDefault,
 				},
 			},
@@ -59,11 +59,11 @@ func Test_advancedLocalAccessProvider_MCPCluster(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			fakeProvider := &fakeAdvancedClusterAccessReconciler{
-				clusters:       map[string]*clusters.Cluster{mcpID: tt.cluster},
-				accessRequests: map[string]*clustersv1alpha1.AccessRequest{mcpID: tt.ar},
+				clusters:       map[string]*clusters.Cluster{controlPlaneID: tt.cluster},
+				accessRequests: map[string]*clustersv1alpha1.AccessRequest{controlPlaneID: tt.ar},
 			}
 			localAccessProvider := NewLocalAdvancedClusterAccessReconciler(fakeProvider)
-			got, gotErr := localAccessProvider.Access(context.Background(), reconcile.Request{}, mcpID)
+			got, gotErr := localAccessProvider.Access(context.Background(), reconcile.Request{}, controlPlaneID)
 			if gotErr != nil {
 				if !tt.wantErr {
 					t.Errorf("Access() failed: %v", gotErr)
@@ -136,11 +136,107 @@ func Test_advancedLocalAccessProvider_WorkloadCluster(t *testing.T) {
 	}
 }
 
+func Test_advancedLocalAccessProvider_WithWorkloadCluster(t *testing.T) {
+	tests := []struct {
+		name                string
+		ar                  *clustersv1alpha1.AccessRequest
+		cluster             *clusters.Cluster
+		withWorkload        bool
+		controlPlaneCluster *clustersv1alpha1.Cluster
+		wantHost            string
+		wantErr             bool
+	}{
+		{
+			name:         "WithWorkloadCluster results in ControlPlane host changed to internalURL",
+			withWorkload: true,
+			ar: &clustersv1alpha1.AccessRequest{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{clusterprovider.LocalAccessAnnotation: localAPIServer},
+				},
+			},
+			cluster: createFakeCluster().WithRESTConfig(&rest.Config{Host: localAPIServer}),
+			controlPlaneCluster: &clustersv1alpha1.Cluster{
+				Status: clustersv1alpha1.ClusterStatus{
+					Endpoints: clustersv1alpha1.Endpoints{
+						{
+							Name: clustersv1alpha1.APISERVER_ENDPOINT_INTERNAL,
+							URL:  inclusterAPIServer,
+						},
+					},
+				},
+			},
+			wantHost: inclusterAPIServer,
+		},
+		{
+			name:         "Without WithWorkloadCluster results in ControlPlane host patched to local annotation only",
+			withWorkload: false,
+			ar: &clustersv1alpha1.AccessRequest{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{clusterprovider.LocalAccessAnnotation: localAPIServer},
+				},
+			},
+			cluster:  createFakeCluster().WithRESTConfig(&rest.Config{Host: localAPIServer}),
+			wantHost: localAPIServer,
+		},
+		{
+			name:         "WithWorkloadCluster and nil controlPlaneCluster results in error",
+			withWorkload: true,
+			ar: &clustersv1alpha1.AccessRequest{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{clusterprovider.LocalAccessAnnotation: localAPIServer},
+				},
+			},
+			cluster: createFakeCluster().WithRESTConfig(&rest.Config{Host: localAPIServer}),
+			wantErr: true,
+		},
+		{
+			name:         "WithWorkloadCluster and missing APISERVER_ENDPOINT_INTERNAL results in error",
+			withWorkload: true,
+			ar: &clustersv1alpha1.AccessRequest{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{clusterprovider.LocalAccessAnnotation: localAPIServer},
+				},
+			},
+			cluster: createFakeCluster().WithRESTConfig(&rest.Config{Host: localAPIServer}),
+			controlPlaneCluster: &clustersv1alpha1.Cluster{
+				Status: clustersv1alpha1.ClusterStatus{
+					Endpoints: clustersv1alpha1.Endpoints{
+						{},
+					},
+				},
+			},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fakeProvider := &fakeAdvancedClusterAccessReconciler{
+				clusters:         map[string]*clusters.Cluster{controlPlaneID: tt.cluster},
+				accessRequests:   map[string]*clustersv1alpha1.AccessRequest{controlPlaneID: tt.ar},
+				clusterResources: map[string]*clustersv1alpha1.Cluster{controlPlaneID: tt.controlPlaneCluster},
+			}
+			var opts []LocalAccessOption
+			if tt.withWorkload {
+				opts = append(opts, WithWorkloadCluster())
+			}
+			provider := NewLocalAdvancedClusterAccessReconciler(fakeProvider, opts...)
+			got, err := provider.Access(context.Background(), reconcile.Request{}, controlPlaneID)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tt.wantHost, got.RESTConfig().Host)
+		})
+	}
+}
+
 var _ advanced.ClusterAccessReconciler = &fakeAdvancedClusterAccessReconciler{}
 
 type fakeAdvancedClusterAccessReconciler struct {
-	clusters       map[string]*clusters.Cluster
-	accessRequests map[string]*clustersv1alpha1.AccessRequest
+	clusters         map[string]*clusters.Cluster
+	accessRequests   map[string]*clustersv1alpha1.AccessRequest
+	clusterResources map[string]*clustersv1alpha1.Cluster
 }
 
 // Access implements [advanced.ClusterAccessReconciler].
@@ -159,8 +255,8 @@ func (f *fakeAdvancedClusterAccessReconciler) ClusterRequest(_ context.Context, 
 }
 
 // Cluster implements [advanced.ClusterAccessReconciler].
-func (f *fakeAdvancedClusterAccessReconciler) Cluster(_ context.Context, _ reconcile.Request, _ string, _ ...any) (*clustersv1alpha1.Cluster, error) {
-	panic("unimplemented")
+func (f *fakeAdvancedClusterAccessReconciler) Cluster(_ context.Context, _ reconcile.Request, id string, _ ...any) (*clustersv1alpha1.Cluster, error) {
+	return f.clusterResources[id], nil
 }
 
 // Reconcile implements [advanced.ClusterAccessReconciler].
