@@ -18,16 +18,28 @@ var _ advanced.ClusterAccessReconciler = &localAdvancedClusterAccessReconciler{}
 // instead of the wrapped reconciler.
 type localAdvancedClusterAccessReconciler struct {
 	advanced.ClusterAccessReconciler
-	withWorkload bool
+	withWorkloadCluster bool
+}
+
+// LocalAccessOption is a functional option for NewLocalAdvancedClusterAccessReconciler.
+type LocalAccessOption func(*localAdvancedClusterAccessReconciler)
+
+// WithWorkloadCluster configures the local reconciler to override the ControlPlane rest.Config with the host on the docker network.
+func WithWorkloadCluster() LocalAccessOption {
+	return func(r *localAdvancedClusterAccessReconciler) {
+		r.withWorkloadCluster = true
+	}
 }
 
 // NewLocalAdvancedClusterAccessReconciler returns a local advanced cluster access reconciler that wraps the given advanced cluster access reconciler.
-// Set withWorkload to true when the service provider deploys to a workload cluster
-func NewLocalAdvancedClusterAccessReconciler(car advanced.ClusterAccessReconciler, withWorkload bool) advanced.ClusterAccessReconciler {
-	return &localAdvancedClusterAccessReconciler{
+func NewLocalAdvancedClusterAccessReconciler(car advanced.ClusterAccessReconciler, opts ...LocalAccessOption) advanced.ClusterAccessReconciler {
+	r := &localAdvancedClusterAccessReconciler{
 		ClusterAccessReconciler: car,
-		withWorkload:            withWorkload,
 	}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
 }
 
 // Access implements [advanced.ClusterAccessReconciler].
@@ -43,11 +55,11 @@ func (s *localAdvancedClusterAccessReconciler) Access(ctx context.Context, reque
 	// Always patch the cluster client with the host value of the local AR annotation so that the service provider process can connect.
 	cluster = MustPatchClusterClient(ctx, ar, cluster)
 
-	// If the service provider is using a workload cluster we additionally have to override the MCPs rest.Config.Host to the Docker-network address fetched from the "apiserver-internal" endpoint of the Cluster.
-	// Using this endpoint, the pod running on the workload cluster can reach the MCP API server if injected as KUBERNETES_SERVICE_HOST and KUBERNETES_SERVICE_PORT env vars.
+	// If the service provider is using a workload cluster we additionally have to override the ControlPlanes rest.Config.Host to the Docker-network address fetched from the "apiserver-internal" endpoint of the Cluster.
+	// Using this endpoint, the pod running on the workload cluster can reach the ControlPlane API server if injected as KUBERNETES_SERVICE_HOST and KUBERNETES_SERVICE_PORT env vars.
 	// If we would not override it the rest.Config.Host would point to localhost.
 	// Warning: This does not affect the cluster client as we only initialize it in MustPatchClusterClient. As a result the rest.Config points to a different host than the cluster client!
-	if id == MCPClusterID && s.withWorkload && cluster.HasRESTConfig() {
+	if id == MCPClusterID && s.withWorkloadCluster && cluster.HasRESTConfig() {
 		mcpCluster, err := s.Cluster(ctx, request, id, additionalData...)
 		if err != nil {
 			return cluster, err
