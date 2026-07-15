@@ -55,6 +55,26 @@ tasks:
       - >
         {{.CONTROLLER_GEN}} crd paths={{.PATHS}} output:crd:artifacts:config={{.OUTPUT}}
 
+  test:run:
+    desc: Run tests with coverage and race detection
+    cmds:
+      - go test -cover -race ./...
+
+  golint:install:
+    desc: Install golangci-lint locally
+    generates:
+      - "{{.LOCALBIN}}/golangci-lint"
+    run: once
+    cmds:
+      - mkdir -p {{.LOCALBIN}}
+      - GOBIN={{.LOCALBIN}} go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+
+  golint:lint:
+    desc: Run golangci-lint on the project
+    cmds:
+      - task: golint:install
+      - "{{.LOCALBIN}}/golangci-lint run ./..."
+
   envtest:install:
     desc: Install setup-envtest locally
     generates:
@@ -71,3 +91,13 @@ tasks:
     cmds:
       - >
         {{.ENVTEST_SETUP}} use {{.ENVTEST_K8S_VERSION}} --bin-dir {{.LOCALBIN}}
+
+  test:ci:
+    desc: Run all CI checks (build, vet, lint, generate, envtest setup, test)
+    cmds:
+      - go build ./...
+      - go vet ./...
+      - task: golint:lint
+      - task: test:generate
+      - task: envtest:setup
+      - task: test:run
