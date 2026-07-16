@@ -377,6 +377,27 @@ func assertStatusUpdate(t *testing.T, c client.Client, req ctrl.Request, wantSta
 	assert.Equal(t, wantStatusPhase, status.Phase)
 }
 
+func assertReconcileAnnotationRemoved(t *testing.T, c client.Client, req ctrl.Request) {
+	t.Helper()
+	obj := &fakeApiImpl{}
+	obj.SetName(req.Name)
+	obj.SetNamespace(req.Namespace)
+	require.NoError(t, c.Get(context.Background(), client.ObjectKeyFromObject(obj), obj))
+	_, hasAnnotation := obj.GetAnnotations()[apiconst.OperationAnnotation]
+	assert.False(t, hasAnnotation, "Operation annotation should have been removed")
+}
+
+func assertIgnoreAnnotationPersisted(t *testing.T, c client.Client, req ctrl.Request) {
+	t.Helper()
+	obj := &fakeApiImpl{}
+	obj.SetName(req.Name)
+	obj.SetNamespace(req.Namespace)
+	require.NoError(t, c.Get(context.Background(), client.ObjectKeyFromObject(obj), obj))
+	_, hasAnnotation := obj.GetAnnotations()[apiconst.OperationAnnotation]
+	assert.True(t, hasAnnotation, "Operation annotation should have been persisted")
+	assert.Equal(t, apiconst.OperationAnnotationValueIgnore, obj.GetAnnotations()[apiconst.OperationAnnotation], "Operation annotation value should be 'ignore'")
+}
+
 var _ clusteraccess.Provider = FakeClusterAccessProvider{}
 var _ Reconciler[*fakeApiImpl, *fakeProviderConfigImpl] = &MockServiceProviderReconciler{}
 
@@ -699,6 +720,33 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 			wantErr:            false,
 		},
 		{
+			name: "Operation annotation reconcile -> remove annotation and proceed with reconciliation",
+			apiObj: &fakeApiImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+					Annotations: map[string]string{
+						apiconst.OperationAnnotation: apiconst.OperationAnnotationValueReconcile,
+					},
+				},
+			},
+			req: ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+				},
+			},
+			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
+			},
+			want:               ctrl.Result{},
+			wantStatusPhase:    StatusPhaseReady,
+			wantReconciliation: true,
+			wantErr:            false,
+		},
+		{
 			name: "cluster access reconciler fails -> error and status update",
 			apiObj: &fakeApiImpl{
 				ObjectMeta: metav1.ObjectMeta{
@@ -809,6 +857,16 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 				Name:      testWorkloadKubeconfig,
 			}, mockReconciler.clusterContext.WorkloadAccessSecretKey)
 			assertStatusUpdate(t, onboardingCluster.Client(), tt.req, tt.wantStatusPhase)
+
+			// For annotation reconcile case, verify the annotation was persisted
+			if tt.name == "Operation annotation ignore -> no reconciliation, no requeue" {
+				assertIgnoreAnnotationPersisted(t, onboardingCluster.Client(), tt.req)
+			}
+
+			// For annotation reconcile case, verify the annotation was removed
+			if tt.name == "Operation annotation reconcile -> remove annotation and proceed with reconciliation" {
+				assertReconcileAnnotationRemoved(t, onboardingCluster.Client(), tt.req)
+			}
 		})
 	}
 }

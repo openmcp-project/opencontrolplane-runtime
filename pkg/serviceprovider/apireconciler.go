@@ -166,8 +166,11 @@ func (r *APIReconciler[T, C]) Reconcile(ctx context.Context, req ctrl.Request) (
 	if err := r.onboardingCluster.Client().Get(ctx, req.NamespacedName, obj); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	// Skip reconciliation if annotation is set
-	if obj.GetAnnotations()[apiconst.OperationAnnotation] == apiconst.OperationAnnotationValueIgnore {
+	skip, err := r.handleOperationAnnotation(ctx, obj)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if skip {
 		l.Info("Skipping resource due to ignore operation annotation")
 		return ctrl.Result{}, nil
 	}
@@ -219,6 +222,29 @@ func (r *APIReconciler[T, C]) Reconcile(ctx context.Context, req ctrl.Request) (
 	return ctrl.Result{
 		RequeueAfter: providerConfigCopy.PollInterval(),
 	}, nil
+}
+
+func (r *APIReconciler[T, C]) handleOperationAnnotation(ctx context.Context, obj T) (bool, error) {
+	annotations := obj.GetAnnotations()
+	if annotations == nil {
+		return false, nil
+	}
+	op, ok := annotations[apiconst.OperationAnnotation]
+	if !ok {
+		return false, nil
+	}
+	l := logf.FromContext(ctx)
+	switch op {
+	case apiconst.OperationAnnotationValueIgnore:
+		return true, nil
+	case apiconst.OperationAnnotationValueReconcile:
+		l.Info("Reconciliation requested via annotation. Removing annotation and proceeding with reconciliation")
+		if err := controllerutil2.EnsureAnnotation(ctx, r.onboardingCluster.Client(), obj, apiconst.OperationAnnotation, "", true, controllerutil2.DELETE); err != nil {
+			l.Error(err, "Failed to remove operation annotation")
+			return false, err
+		}
+	}
+	return false, nil
 }
 
 func (r *APIReconciler[T, PC]) updateStatus(ctx context.Context, newObj T, oldObj T) error {
