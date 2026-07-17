@@ -2,42 +2,20 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    tags:
+      - v*
+    branches:
+      - master
+      - main
   pull_request:
-    branches: [main]
+    branches:
+      - master
+      - main
+
+permissions:
+  contents: read
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
-        with:
-          go-version-file: go.mod
-
-      - name: Build
-        run: go build ./...
-
-      - name: Vet
-        run: go vet ./...
-
-      - name: Lint
-        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
-        with:
-          version: v2.12.2
-
-      - name: Install Task
-        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52 # v3.0.0
-        with:
-          version: 3.x
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: generate code/crds
-        run: task test:generate
-
-      - name: envtest setup
-        run: task envtest:setup
-
-      - name: Test
-        run: go test -cover -race ./...
+  build_validate_test:
+    uses: openmcp-project/build/.github/workflows/ci.lib.yaml@04e9a1153743bd02ab08fc3bb772cb98a5cf1edd # main
+    secrets: inherit
