@@ -57,8 +57,8 @@ func StatusTerminating(obj API) {
 	obj.SetPhase(StatusPhaseTerminating)
 }
 
-// TerminatingWithReason indicates terminating with synced false and a caller-provided reason and message
-func TerminatingWithReason(obj API, reason, message string) {
+// StatusTerminatingWithReason indicates terminating with synced false and a caller-provided reason and message
+func StatusTerminatingWithReason(obj API, reason, message string) {
 	meta.SetStatusCondition(obj.GetConditions(), metav1.Condition{
 		Type:               ServiceProviderConditionReady,
 		Status:             metav1.ConditionFalse,
