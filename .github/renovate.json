@@ -1,0 +1,13 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "github>openmcp-project/.github:renovate-config",
+    ":enableVulnerabilityAlerts"
+  ],
+  "git-submodules": {
+    "enabled": true
+  },
+  "gitIgnoredAuthors": [
+    "github-actions[bot]@users.noreply.github.com"
+  ]
+}
