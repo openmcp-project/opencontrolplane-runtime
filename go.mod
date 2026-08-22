@@ -8,7 +8,7 @@ require (
 	github.com/onsi/gomega v1.42.1
 	github.com/openmcp-project/controller-utils v0.31.0
 	github.com/openmcp-project/openmcp-operator/api v1.3.0
-	github.com/stretchr/testify v1.11.1
+	github.com/stretchr/testify v1.12.0
 	go.uber.org/zap v1.28.0
 	k8s.io/api v0.36.3
 	k8s.io/apiextensions-apiserver v0.36.3
