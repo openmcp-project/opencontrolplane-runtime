@@ -6,6 +6,7 @@ import (
 
 	"github.com/openmcp-project/controller-utils/pkg/clusters"
 	controllerutil2 "github.com/openmcp-project/controller-utils/pkg/controller"
+	ctrlutils "github.com/openmcp-project/controller-utils/pkg/controller"
 	"github.com/openmcp-project/opencontrolplane-runtime/pkg/serviceprovider/clusteraccess"
 	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
 	apiconst "github.com/openmcp-project/openmcp-operator/api/constants"
@@ -14,6 +15,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -397,7 +399,19 @@ func (r *APIReconciler[T, C]) SetupWithManager(mgr ctrl.Manager, providerName st
 	}
 	r.providerName = providerName
 	controller := ctrl.NewControllerManagedBy(mgr).
-		For(r.emptyObj()).
+		For(r.emptyObj(), builder.WithPredicates(
+			predicate.And(
+				predicate.Or(
+					predicate.GenerationChangedPredicate{},
+					ctrlutils.DeletionTimestampChangedPredicate{},
+					predicate.LabelChangedPredicate{},
+					predicate.AnnotationChangedPredicate{},
+				),
+				predicate.Not(
+					ctrlutils.HasAnnotationPredicate(apiconst.OperationAnnotation, apiconst.OperationAnnotationValueIgnore),
+				),
+			),
+		)).
 		// add provider config watch
 		WatchesRawSource(source.Kind(
 			r.platformCluster.Cluster().GetCache(),
