@@ -14,6 +14,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -397,7 +398,19 @@ func (r *APIReconciler[T, C]) SetupWithManager(mgr ctrl.Manager, providerName st
 	}
 	r.providerName = providerName
 	controller := ctrl.NewControllerManagedBy(mgr).
-		For(r.emptyObj()).
+		For(r.emptyObj(), builder.WithPredicates(
+			predicate.And(
+				predicate.Or(
+					predicate.GenerationChangedPredicate{},
+					controllerutil2.DeletionTimestampChangedPredicate{},
+					predicate.LabelChangedPredicate{},
+					predicate.AnnotationChangedPredicate{},
+				),
+				predicate.Not(
+					controllerutil2.HasAnnotationPredicate(apiconst.OperationAnnotation, apiconst.OperationAnnotationValueIgnore),
+				),
+			),
+		)).
 		// add provider config watch
 		WatchesRawSource(source.Kind(
 			r.platformCluster.Cluster().GetCache(),
