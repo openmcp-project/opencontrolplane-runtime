@@ -6,7 +6,6 @@ import (
 
 	"github.com/openmcp-project/controller-utils/pkg/clusters"
 	controllerutil2 "github.com/openmcp-project/controller-utils/pkg/controller"
-	ctrlutils "github.com/openmcp-project/controller-utils/pkg/controller"
 	"github.com/openmcp-project/opencontrolplane-runtime/pkg/serviceprovider/clusteraccess"
 	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
 	apiconst "github.com/openmcp-project/openmcp-operator/api/constants"
@@ -403,12 +402,12 @@ func (r *APIReconciler[T, C]) SetupWithManager(mgr ctrl.Manager, providerName st
 			predicate.And(
 				predicate.Or(
 					predicate.GenerationChangedPredicate{},
-					ctrlutils.DeletionTimestampChangedPredicate{},
+					controllerutil2.DeletionTimestampChangedPredicate{},
 					predicate.LabelChangedPredicate{},
 					predicate.AnnotationChangedPredicate{},
 				),
 				predicate.Not(
-					ctrlutils.HasAnnotationPredicate(apiconst.OperationAnnotation, apiconst.OperationAnnotationValueIgnore),
+					controllerutil2.HasAnnotationPredicate(apiconst.OperationAnnotation, apiconst.OperationAnnotationValueIgnore),
 				),
 			),
 		)).
