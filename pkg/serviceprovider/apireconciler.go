@@ -391,14 +391,23 @@ func (r *APIReconciler[T, C]) clusters(ctx context.Context, req ctrl.Request, ad
 	return clusterContext, res, nil
 }
 
-// SetupWithManager sets up the controller with the Manager.
-func (r *APIReconciler[T, C]) SetupWithManager(mgr ctrl.Manager, providerName string) error {
-	if providerName == "" {
-		return errors.New("provider name is required for manager setup")
+type controllerConfig struct {
+	forPredicates builder.Predicates
+}
+
+// ControllerOption modifies options of the controller runtime builder.
+type ControllerOption func(c *controllerConfig)
+
+// WithForPredicates allows to override the default set of predicates passed to the For method of the controller runtime builder.
+func WithForPredicates(predicates builder.Predicates) ControllerOption {
+	return func(c *controllerConfig) {
+		c.forPredicates = predicates
 	}
-	r.providerName = providerName
-	controller := ctrl.NewControllerManagedBy(mgr).
-		For(r.emptyObj(), builder.WithPredicates(
+}
+
+func defaultControllerConfig() *controllerConfig {
+	return &controllerConfig{
+		forPredicates: builder.WithPredicates(
 			predicate.And(
 				predicate.Or(
 					predicate.GenerationChangedPredicate{},
@@ -410,7 +419,22 @@ func (r *APIReconciler[T, C]) SetupWithManager(mgr ctrl.Manager, providerName st
 					controllerutil2.HasAnnotationPredicate(apiconst.OperationAnnotation, apiconst.OperationAnnotationValueIgnore),
 				),
 			),
-		)).
+		),
+	}
+}
+
+// SetupWithManager sets up the controller with the Manager.
+func (r *APIReconciler[T, C]) SetupWithManager(mgr ctrl.Manager, providerName string, opts ...ControllerOption) error {
+	if providerName == "" {
+		return errors.New("provider name is required for manager setup")
+	}
+	cfg := defaultControllerConfig()
+	for _, o := range opts {
+		o(cfg)
+	}
+	r.providerName = providerName
+	controller := ctrl.NewControllerManagedBy(mgr).
+		For(r.emptyObj(), cfg.forPredicates).
 		// add provider config watch
 		WatchesRawSource(source.Kind(
 			r.platformCluster.Cluster().GetCache(),
