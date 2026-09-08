@@ -1,6 +1,6 @@
 module github.com/openmcp-project/opencontrolplane-runtime
 
-go 1.27.0
+go 1.27.1
 
 require (
 	github.com/go-logr/zapr v1.3.0
