@@ -5,6 +5,20 @@ includes:
     taskfile: hack/common/Taskfile_library.yaml
     flatten: true
     vars:
-      CODE_DIRS: "{{.ROOT_DIR}}/pkg/..."
+      CODE_DIRS: "{{.ROOT_DIR}}/pkg/... {{.ROOT_DIR}}/testdata/api/... {{.ROOT_DIR}}/testdata/config/..."
       REPO_URL: "https://github.com/openmcp-project/opencontrolplane-runtime"
       ENVTEST_REQUIRED: "true"
+
+tasks:
+  test:generate:
+    desc: Generate testdata DeepCopy files and CRDs
+    deps:
+      - tools:controller-gen
+    cmds:
+      - "{{.CONTROLLER_GEN}} object paths=./testdata/api/..."
+      - "{{.CONTROLLER_GEN}} object paths=./testdata/config/..."
+      - rm -rf ./testdata/api/crd/bases
+      - "{{.CONTROLLER_GEN}} crd paths=./testdata/api/... output:crd:artifacts:config=./testdata/api/crd/bases"
+      - rm -rf ./testdata/config/crd/bases
+      - "{{.CONTROLLER_GEN}} crd paths=./testdata/config/... output:crd:artifacts:config=./testdata/config/crd/bases"
+      - task: generate:format-imports
