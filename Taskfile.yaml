@@ -11,7 +11,7 @@ includes:
 
 tasks:
   test:generate:
-    desc: Generate testdata DeepCopy files and CRDs
+    desc: Generate testdata DeepCopy files and CRDs for the test API
     deps:
       - tools:controller-gen
     cmds:
