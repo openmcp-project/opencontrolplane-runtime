@@ -4,12 +4,14 @@
 
 ## Development
 
-This project uses [task](https://taskfile.dev/) to generate test data and configure [envtest](https://sigs.k8s.io/controller-runtime/tools/setup-envtest). Execute the following two tasks to run the test suite:
+This project uses [task](https://taskfile.dev/) for code generation, validation, and tests. Run the following tasks:
 
-1. `task test:generate` to generate the test manifests with [controller-gen](https://sigs.k8s.io/controller-tools/cmd/controller-gen).
-2. `task envtest:setup` to configure envtest.
+1. `task generate` to update Go modules and apply formatting.
+2. `task test:generate` to regenerate testdata DeepCopy files and CRD manifests.
+3. `task validate` to run vet, lint, and import-format validation.
+4. `task test` to set up envtest and run the test suite.
 
-Then execute the test suite with `go test ./...`.
+The test task configures [envtest](https://sigs.k8s.io/controller-runtime/tools/setup-envtest) automatically.
 
 ## Support, Feedback, Contributing
 

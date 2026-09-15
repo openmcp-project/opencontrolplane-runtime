@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/openmcp-project/controller-utils/pkg/clusters"
-	"github.com/openmcp-project/opencontrolplane-runtime/pkg/clusterprovider"
 	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
 	"github.com/openmcp-project/openmcp-operator/api/common"
 	"github.com/openmcp-project/openmcp-operator/lib/clusteraccess"
@@ -16,6 +15,8 @@ import (
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"github.com/openmcp-project/opencontrolplane-runtime/pkg/clusterprovider"
 )
 
 const (
