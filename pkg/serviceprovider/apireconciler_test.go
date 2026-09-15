@@ -16,7 +16,6 @@ import (
 	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
 	"github.com/openmcp-project/openmcp-operator/api/common"
 	apiconst "github.com/openmcp-project/openmcp-operator/api/constants"
-	mcpv2alpha1 "github.com/openmcp-project/openmcp-operator/api/core/v2alpha1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -60,17 +59,15 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 	tests := []struct {
 		name string // description of this test case
 		// Named input parameters for target function.
-		apiObj             API
-		providerConfig     *fakeProviderConfigImpl
-		req                ctrl.Request
-		want               ctrl.Result
-		wantStatusPhase    string
-		wantReason         string
-		wantReconciliation bool
-		wantErr            bool
-		// noMCP, when true, omits the seeded ManagedControlPlaneV2 from the onboarding cluster
-		// to simulate the issue #9 scenario.
-		noMCP bool
+		apiObj               API
+		providerConfig       *fakeProviderConfigImpl
+		req                  ctrl.Request
+		want                 ctrl.Result
+		wantStatusPhase      string
+		wantReason           string
+		wantReconciliation   bool
+		wantErr              bool
+		missingClusterAccess bool
 	}{
 		{
 			name: "CreateOrUpdate ok -> requeue with pc poll interval",
@@ -284,7 +281,7 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 			wantErr:            true,
 		},
 		{
-			name: "ManagedControlPlaneV2 missing -> Progressing with ManagedControlPlaneNotFound condition",
+			name: "CreateOrUpdate with missing cluster access -> requeue with reason WaitingForClusterContext",
 			apiObj: &fakeApiImpl{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      testObjectName,
@@ -292,6 +289,9 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 				},
 			},
 			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
 				FakePollInterval: time.Hour,
 			},
 			req: ctrl.Request{
@@ -303,14 +303,14 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 			want: ctrl.Result{
 				RequeueAfter: time.Hour,
 			},
-			wantStatusPhase:    StatusPhaseProgressing,
-			wantReason:         reasonManagedControlPlaneNotFound,
-			wantReconciliation: false,
-			wantErr:            false,
-			noMCP:              true,
+			wantStatusPhase:      StatusPhaseProgressing,
+			wantReason:           reasonWaitingForClusterContext,
+			wantReconciliation:   false,
+			wantErr:              false,
+			missingClusterAccess: true,
 		},
 		{
-			name: "Delete succeeds even when ManagedControlPlaneV2 is missing",
+			name: "Delete with missing cluster access -> requeue with reason WaitingForClusterContext",
 			apiObj: &fakeApiImpl{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      testObjectName,
@@ -322,6 +322,9 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 				},
 			},
 			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
 				FakePollInterval: time.Hour,
 			},
 			req: ctrl.Request{
@@ -333,61 +336,56 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 			want: ctrl.Result{
 				RequeueAfter: time.Hour,
 			},
-			// SP-domain Delete is intentionally skipped (no MCP cluster to clean up on);
-			// AccessRequest cleanup and finalizer removal still run via clusterAccessProvider.ReconcileDelete.
-			wantStatusPhase:    StatusPhaseTerminating,
-			wantReconciliation: false,
-			wantErr:            false,
-			noMCP:              true,
+			wantStatusPhase:      StatusPhaseTerminating,
+			wantReason:           reasonWaitingForClusterContext,
+			wantReconciliation:   false,
+			wantErr:              false,
+			missingClusterAccess: true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			onboardingObjects := []client.Object{tt.apiObj}
-			if !tt.noMCP {
-				// onboardingObjects = append(onboardingObjects, &mcpv2alpha1.ManagedControlPlaneV2{
-				// 	ObjectMeta: metav1.ObjectMeta{
-				// 		Name:      tt.req.Name,
-				// 		Namespace: tt.req.Namespace,
-				// 	},
-				// })
-			}
 			onboardingCluster := createFakeCluster(t, "onboarding", onboardingObjects...)
 			platformCluster := createFakeCluster(t, "platform")
 			mockReconciler := &MockServiceProviderReconciler{
 				wantError: tt.wantErr,
+			}
+			clusterAccessProvider := FakeClusterAccessProvider{
+				ManagedControlPlane: createFakeCluster(t, testMCPName),
+				ManagedControlPlaneAR: &clustersv1alpha1.AccessRequest{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      testMCPName,
+						Namespace: testNamespaceName,
+					},
+					Status: clustersv1alpha1.AccessRequestStatus{
+						SecretRef: &common.LocalObjectReference{
+							Name: testMCPKubeconfig,
+						},
+					},
+				},
+				Workload: createFakeCluster(t, testWorkloadName),
+				WorkloadAR: &clustersv1alpha1.AccessRequest{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      testWorkloadName,
+						Namespace: testNamespaceName,
+					},
+					Status: clustersv1alpha1.AccessRequestStatus{
+						SecretRef: &common.LocalObjectReference{
+							Name: testWorkloadKubeconfig,
+						},
+					},
+				},
+			}
+			if tt.missingClusterAccess {
+				clusterAccessProvider.RequeueAfter = time.Hour
 			}
 			builder := NewAPIReconcilerBuilder[*fakeApiImpl, *fakeProviderConfigImpl]().
 				EmptyObjectProvider(func() *fakeApiImpl { return &fakeApiImpl{} }).
 				EmptyConfigProvider(func() *fakeProviderConfigImpl { return &fakeProviderConfigImpl{} }).
 				OnboardingCluster(onboardingCluster).
 				PlatformCluster(platformCluster).
-				ClusterAccessReconciler(FakeClusterAccessProvider{
-					ManagedControlPlane: createFakeCluster(t, testMCPName),
-					ManagedControlPlaneAR: &clustersv1alpha1.AccessRequest{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      testMCPName,
-							Namespace: testNamespaceName,
-						},
-						Status: clustersv1alpha1.AccessRequestStatus{
-							SecretRef: &common.LocalObjectReference{
-								Name: testMCPKubeconfig,
-							},
-						},
-					},
-					Workload: createFakeCluster(t, testWorkloadName),
-					WorkloadAR: &clustersv1alpha1.AccessRequest{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      testWorkloadName,
-							Namespace: testNamespaceName,
-						},
-						Status: clustersv1alpha1.AccessRequestStatus{
-							SecretRef: &common.LocalObjectReference{
-								Name: testWorkloadKubeconfig,
-							},
-						},
-					},
-				}).
+				ClusterAccessReconciler(clusterAccessProvider).
 				Reconciler(mockReconciler).
 				WorkloadCluster(true)
 			r := builder.MustBuild()
@@ -473,6 +471,7 @@ func assertReconcileAnnotationRemoved(t *testing.T, c client.Client, req ctrl.Re
 	obj := &fakeApiImpl{}
 	obj.SetName(req.Name)
 	obj.SetNamespace(req.Namespace)
+	require.NoError(t, c.Get(context.Background(), client.ObjectKeyFromObject(obj), obj))
 	_, hasAnnotation := obj.GetAnnotations()[apiconst.OperationAnnotation]
 	assert.False(t, hasAnnotation, "Operation annotation should have been removed")
 }
@@ -532,6 +531,7 @@ type FakeClusterAccessProvider struct {
 	ManagedControlPlaneAR *clustersv1alpha1.AccessRequest
 	Workload              *clusters.Cluster
 	WorkloadAR            *clustersv1alpha1.AccessRequest
+	RequeueAfter          time.Duration
 }
 
 // MCPAccessRequest implements [ClusterAccessProvider].
@@ -549,7 +549,9 @@ func (f FakeClusterAccessProvider) Reconcile(ctx context.Context, request reconc
 	if request.Name == testObjectNameClusterAccessError {
 		return reconcile.Result{}, errors.New("cluster access reconcile failed")
 	}
-	return reconcile.Result{}, nil
+	return reconcile.Result{
+		RequeueAfter: f.RequeueAfter,
+	}, nil
 }
 
 // ReconcileDelete implements [ClusterAccessProvider].
@@ -969,7 +971,6 @@ func createFakeCluster(t *testing.T, id string, clusterObjects ...client.Object)
 	_ = clientgoscheme.AddToScheme(scheme)
 	_ = apiextv1.AddToScheme(scheme)
 	_ = clustersv1alpha1.AddToScheme(scheme)
-	_ = mcpv2alpha1.AddToScheme(scheme)
 	scheme.AddKnownTypes(testGV, &fakeApiImpl{}, &fakeProviderConfigImpl{})
 
 	// init cluster with objects

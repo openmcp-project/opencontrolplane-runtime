@@ -9,12 +9,10 @@ import (
 	controllerutil2 "github.com/openmcp-project/controller-utils/pkg/controller"
 	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
 	apiconst "github.com/openmcp-project/openmcp-operator/api/constants"
-	mcpv2alpha1 "github.com/openmcp-project/openmcp-operator/api/core/v2alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -111,12 +109,8 @@ func (b *APIReconcilerBuilder[T, C]) PlatformCluster(c *clusters.Cluster) *APIRe
 	return b
 }
 
-// OnboardingCluster sets the onboarding cluster. The runtime registers core.openmcp.cloud/v2alpha1
-// onto the cluster's scheme so it can read ManagedControlPlaneV2 to surface a clear error when the
-// implicitly-referenced MCP for an SP CR doesn't exist; consumers don't need to register this type
-// themselves.
+// OnboardingCluster sets the onboarding cluster.
 func (b *APIReconcilerBuilder[T, C]) OnboardingCluster(c *clusters.Cluster) *APIReconcilerBuilder[T, C] {
-	utilruntime.Must(mcpv2alpha1.AddToScheme(c.Scheme()))
 	b.apiReconciler.onboardingCluster = c
 	return b
 }
@@ -281,7 +275,7 @@ func (r *APIReconciler[T, C]) delete(ctx context.Context, obj T, config C, addit
 			return ctrl.Result{}, err
 		}
 		if res.RequeueAfter > 0 {
-			StatusTerminatingWithReason(obj, "Reconciling", "cluster cleanup")
+			StatusTerminatingWithReason(obj, reasonWaitingForClusterContext, r.waitingForClusterContextMessage(req))
 			return res, nil
 		}
 		res, err = r.reconciler.Delete(ctx, obj, config, clusterContext)
@@ -329,27 +323,19 @@ func (r *APIReconciler[T, C]) createOrUpdate(ctx context.Context, obj T, config 
 		return ctrl.Result{}, err
 	}
 	if res.RequeueAfter > 0 {
+		StatusProgressing(obj, reasonWaitingForClusterContext, r.waitingForClusterContextMessage(req))
 		return res, nil
 	}
 	return r.reconciler.CreateOrUpdate(ctx, obj, config, clusterContext)
 }
 
-// managedControlPlaneNotFoundMessage returns a user-facing message for the ManagedControlPlaneNotFound
-// condition. It names the convention so users can self-resolve.
-func managedControlPlaneNotFoundMessage(req ctrl.Request) string {
-	return fmt.Sprintf(
-		"ManagedControlPlaneV2 %q not found on the onboarding cluster. "+
-			"A ServiceProviderAPI requires a matching ManagedControlPlaneV2 with the same name and namespace. "+
-			"Create the ManagedControlPlaneV2 first, then re-apply.",
-		req.Namespace+"/"+req.Name,
-	)
-}
-
-// managedControlPlaneExists reports whether the ManagedControlPlaneV2 implicitly referenced by the
-// reconciled object exists on the onboarding cluster. It returns false with a nil error when the MCP V2
-// is missing. The onboarding cluster's scheme must have core.openmcp.cloud/v2alpha1 registered.
-func (r *APIReconciler[T, C]) managedControlPlaneExists(ctx context.Context, req ctrl.Request) (bool, error) {
-	return true, nil
+// waitingForClusterContextMessage returns a user-facing message to identify issues like a non-matching request to ControlPlane mapping.
+func (r *APIReconciler[T, C]) waitingForClusterContextMessage(req ctrl.Request) string {
+	wlMsg := ""
+	if r.withWorkloadCluster {
+		wlMsg = " and workload cluster"
+	}
+	return fmt.Sprintf("Waiting for ControlPlane (%s/%s)%s to become accessible", req.Namespace, req.Name, wlMsg)
 }
 
 // areAccessRequestsInDeletion determines if the access requests for a reconcile request are in deletion.
