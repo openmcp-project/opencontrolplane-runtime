@@ -3,6 +3,7 @@ package serviceprovider
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/openmcp-project/controller-utils/pkg/clusters"
 	controllerutil2 "github.com/openmcp-project/controller-utils/pkg/controller"
@@ -108,7 +109,7 @@ func (b *APIReconcilerBuilder[T, C]) PlatformCluster(c *clusters.Cluster) *APIRe
 	return b
 }
 
-// OnboardingCluster set the onboarding cluster.
+// OnboardingCluster sets the onboarding cluster.
 func (b *APIReconcilerBuilder[T, C]) OnboardingCluster(c *clusters.Cluster) *APIReconcilerBuilder[T, C] {
 	b.apiReconciler.onboardingCluster = c
 	return b
@@ -274,7 +275,7 @@ func (r *APIReconciler[T, C]) delete(ctx context.Context, obj T, config C, addit
 			return ctrl.Result{}, err
 		}
 		if res.RequeueAfter > 0 {
-			StatusTerminatingWithReason(obj, "Reconciling", "cluster cleanup")
+			StatusTerminatingWithReason(obj, reasonWaitingForClusterContext, r.waitingForClusterContextMessage(req))
 			return res, nil
 		}
 		res, err = r.reconciler.Delete(ctx, obj, config, clusterContext)
@@ -322,9 +323,19 @@ func (r *APIReconciler[T, C]) createOrUpdate(ctx context.Context, obj T, config 
 		return ctrl.Result{}, err
 	}
 	if res.RequeueAfter > 0 {
+		StatusProgressing(obj, reasonWaitingForClusterContext, r.waitingForClusterContextMessage(req))
 		return res, nil
 	}
 	return r.reconciler.CreateOrUpdate(ctx, obj, config, clusterContext)
+}
+
+// waitingForClusterContextMessage returns a user-facing message to identify issues like a non-matching request to ControlPlane mapping.
+func (r *APIReconciler[T, C]) waitingForClusterContextMessage(req ctrl.Request) string {
+	wlMsg := ""
+	if r.withWorkloadCluster {
+		wlMsg = " and workload cluster"
+	}
+	return fmt.Sprintf("Waiting for ControlPlane (%s/%s)%s to become accessible", req.Namespace, req.Name, wlMsg)
 }
 
 // areAccessRequestsInDeletion determines if the access requests for a reconcile request are in deletion.

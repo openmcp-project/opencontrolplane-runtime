@@ -59,13 +59,15 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 	tests := []struct {
 		name string // description of this test case
 		// Named input parameters for target function.
-		apiObj             API
-		providerConfig     *fakeProviderConfigImpl
-		req                ctrl.Request
-		want               ctrl.Result
-		wantStatusPhase    string
-		wantReconciliation bool
-		wantErr            bool
+		apiObj               API
+		providerConfig       *fakeProviderConfigImpl
+		req                  ctrl.Request
+		want                 ctrl.Result
+		wantStatusPhase      string
+		wantReason           string
+		wantReconciliation   bool
+		wantErr              bool
+		missingClusterAccess bool
 	}{
 		{
 			name: "CreateOrUpdate ok -> requeue with pc poll interval",
@@ -278,45 +280,112 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 			wantReconciliation: true,
 			wantErr:            true,
 		},
+		{
+			name: "CreateOrUpdate with missing cluster access -> requeue with reason WaitingForClusterContext",
+			apiObj: &fakeApiImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+				},
+			},
+			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
+				FakePollInterval: time.Hour,
+			},
+			req: ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+				},
+			},
+			want: ctrl.Result{
+				RequeueAfter: time.Hour,
+			},
+			wantStatusPhase:      StatusPhaseProgressing,
+			wantReason:           reasonWaitingForClusterContext,
+			wantReconciliation:   false,
+			wantErr:              false,
+			missingClusterAccess: true,
+		},
+		{
+			name: "Delete with missing cluster access -> requeue with reason WaitingForClusterContext",
+			apiObj: &fakeApiImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+					DeletionTimestamp: &metav1.Time{
+						Time: time.Now(),
+					},
+					Finalizers: []string{"string"},
+				},
+			},
+			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
+				FakePollInterval: time.Hour,
+			},
+			req: ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+				},
+			},
+			want: ctrl.Result{
+				RequeueAfter: time.Hour,
+			},
+			wantStatusPhase:      StatusPhaseTerminating,
+			wantReason:           reasonWaitingForClusterContext,
+			wantReconciliation:   false,
+			wantErr:              false,
+			missingClusterAccess: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			onboardingCluster := createFakeCluster(t, "onboarding", tt.apiObj)
+			onboardingObjects := []client.Object{tt.apiObj}
+			onboardingCluster := createFakeCluster(t, "onboarding", onboardingObjects...)
 			platformCluster := createFakeCluster(t, "platform")
 			mockReconciler := &MockServiceProviderReconciler{
 				wantError: tt.wantErr,
+			}
+			clusterAccessProvider := FakeClusterAccessProvider{
+				ManagedControlPlane: createFakeCluster(t, testMCPName),
+				ManagedControlPlaneAR: &clustersv1alpha1.AccessRequest{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      testMCPName,
+						Namespace: testNamespaceName,
+					},
+					Status: clustersv1alpha1.AccessRequestStatus{
+						SecretRef: &common.LocalObjectReference{
+							Name: testMCPKubeconfig,
+						},
+					},
+				},
+				Workload: createFakeCluster(t, testWorkloadName),
+				WorkloadAR: &clustersv1alpha1.AccessRequest{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      testWorkloadName,
+						Namespace: testNamespaceName,
+					},
+					Status: clustersv1alpha1.AccessRequestStatus{
+						SecretRef: &common.LocalObjectReference{
+							Name: testWorkloadKubeconfig,
+						},
+					},
+				},
+			}
+			if tt.missingClusterAccess {
+				clusterAccessProvider.RequeueAfter = time.Hour
 			}
 			builder := NewAPIReconcilerBuilder[*fakeApiImpl, *fakeProviderConfigImpl]().
 				EmptyObjectProvider(func() *fakeApiImpl { return &fakeApiImpl{} }).
 				EmptyConfigProvider(func() *fakeProviderConfigImpl { return &fakeProviderConfigImpl{} }).
 				OnboardingCluster(onboardingCluster).
 				PlatformCluster(platformCluster).
-				ClusterAccessReconciler(FakeClusterAccessProvider{
-					ManagedControlPlane: createFakeCluster(t, testMCPName),
-					ManagedControlPlaneAR: &clustersv1alpha1.AccessRequest{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      testMCPName,
-							Namespace: testNamespaceName,
-						},
-						Status: clustersv1alpha1.AccessRequestStatus{
-							SecretRef: &common.LocalObjectReference{
-								Name: testMCPKubeconfig,
-							},
-						},
-					},
-					Workload: createFakeCluster(t, testWorkloadName),
-					WorkloadAR: &clustersv1alpha1.AccessRequest{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      testWorkloadName,
-							Namespace: testNamespaceName,
-						},
-						Status: clustersv1alpha1.AccessRequestStatus{
-							SecretRef: &common.LocalObjectReference{
-								Name: testWorkloadKubeconfig,
-							},
-						},
-					},
-				}).
+				ClusterAccessReconciler(clusterAccessProvider).
 				Reconciler(mockReconciler).
 				WorkloadCluster(true)
 			r := builder.MustBuild()
@@ -345,6 +414,12 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 				assert.Nil(t, mockReconciler.config)
 				assert.Empty(t, mockReconciler.clusterContext.MCPAccessSecretKey)
 				assert.Empty(t, mockReconciler.clusterContext.WorkloadAccessSecretKey)
+				if tt.wantStatusPhase != "" {
+					assertStatusUpdate(t, onboardingCluster.Client(), tt.req, tt.wantStatusPhase)
+				}
+				if tt.wantReason != "" {
+					assertCondition(t, onboardingCluster.Client(), tt.req, tt.wantReason)
+				}
 				return
 			}
 
@@ -373,6 +448,22 @@ func assertStatusUpdate(t *testing.T, c client.Client, req ctrl.Request, wantSta
 	status, ok := obj.GetStatus().(common.Status)
 	require.True(t, ok)
 	assert.Equal(t, wantStatusPhase, status.Phase)
+}
+
+func assertCondition(t *testing.T, c client.Client, req ctrl.Request, wantReason string) {
+	t.Helper()
+	obj := &fakeApiImpl{}
+	obj.SetName(req.Name)
+	obj.SetNamespace(req.Namespace)
+	require.NoError(t, c.Get(context.Background(), client.ObjectKeyFromObject(obj), obj))
+	for _, cond := range *obj.GetConditions() {
+		if cond.Type == ServiceProviderConditionReady {
+			assert.Equal(t, wantReason, cond.Reason)
+			assert.Equal(t, metav1.ConditionFalse, cond.Status)
+			return
+		}
+	}
+	t.Fatalf("expected Ready condition not found, conditions: %+v", *obj.GetConditions())
 }
 
 func assertReconcileAnnotationRemoved(t *testing.T, c client.Client, req ctrl.Request) {
@@ -440,6 +531,7 @@ type FakeClusterAccessProvider struct {
 	ManagedControlPlaneAR *clustersv1alpha1.AccessRequest
 	Workload              *clusters.Cluster
 	WorkloadAR            *clustersv1alpha1.AccessRequest
+	RequeueAfter          time.Duration
 }
 
 // MCPAccessRequest implements [ClusterAccessProvider].
@@ -457,7 +549,9 @@ func (f FakeClusterAccessProvider) Reconcile(ctx context.Context, request reconc
 	if request.Name == testObjectNameClusterAccessError {
 		return reconcile.Result{}, errors.New("cluster access reconcile failed")
 	}
-	return reconcile.Result{}, nil
+	return reconcile.Result{
+		RequeueAfter: f.RequeueAfter,
+	}, nil
 }
 
 // ReconcileDelete implements [ClusterAccessProvider].
