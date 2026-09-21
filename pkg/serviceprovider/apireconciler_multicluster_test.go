@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/cluster"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -167,5 +168,31 @@ func TestMissingTenantDoesNotGuessCleanupIdentity(t *testing.T) {
 	_, err := r.reconcileMulticluster(context.Background(), unavailableTenantManager{}, mcreconcile.Request{ClusterName: "gone"})
 	if !errors.Is(err, multicluster.ErrClusterNotFound) {
 		t.Fatalf("expected retryable missing cluster error, got %v", err)
+	}
+}
+
+type registeredTenantManager struct {
+	mcmanager.Manager
+	tenant cluster.Cluster
+}
+
+func (m registeredTenantManager) GetCluster(context.Context, multicluster.ClusterName) (cluster.Cluster, error) {
+	return m.tenant, nil
+}
+
+func TestMulticlusterAccessKeyRejectsUnregisteredNamespace(t *testing.T) {
+	rejected := errors.New("namespace is not registered for this cluster")
+	r := multiclusterTestBuilder(t).MulticlusterAccessKey(func(cluster string, key client.ObjectKey) (client.ObjectKey, error) {
+		if cluster != key.Namespace {
+			return client.ObjectKey{}, rejected
+		}
+		return key, nil
+	}).MustBuildMulticluster()
+	// A nil tenant client makes it observable that rejection happens before any API access.
+	_, err := r.reconcileMulticluster(context.Background(), registeredTenantManager{}, mcreconcile.Request{
+		ClusterName: "tenant-a", Request: reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "tenant-b", Name: "default"}},
+	})
+	if !errors.Is(err, rejected) {
+		t.Fatalf("expected registration rejection, got %v", err)
 	}
 }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/openmcp-project/opencontrolplane-runtime/pkg/serviceprovider/clusteraccess"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	mcbuilder "sigs.k8s.io/multicluster-runtime/pkg/builder"
 	mccontext "sigs.k8s.io/multicluster-runtime/pkg/context"
@@ -74,6 +75,16 @@ func (b *APIReconcilerBuilder[T, C]) MustBuildMulticluster() *APIReconciler[T, C
 	return &b.apiReconciler
 }
 
+// MulticlusterAccessKey maps tenant object identities to existing platform-side
+// cluster access identities. By default the cluster name qualifies the namespace.
+// A custom mapper must preserve uniqueness across clusters and reject identities
+// outside its registration contract. Use this only when the control plane already
+// assigns globally unique namespaces and existing access objects must be retained.
+func (b *APIReconcilerBuilder[T, C]) MulticlusterAccessKey(mapper func(string, client.ObjectKey) (client.ObjectKey, error)) *APIReconcilerBuilder[T, C] {
+	b.apiReconciler.multiclusterAccessKey = mapper
+	return b
+}
+
 // SetupWithMulticlusterManager sets up the controller with a
 // multicluster-runtime manager. The manager's provider defines the fleet of
 // tenant clusters (e.g. kcp workspaces via an APIExport virtual workspace).
@@ -102,9 +113,17 @@ func (r *APIReconciler[T, C]) reconcileMulticluster(ctx context.Context, mgr mcm
 		// required to identify access objects; do not guess an incomplete delete key.
 		return ctrl.Result{}, err
 	}
+	accessKey := tenantAccessKey(req)
+	if r.multiclusterAccessKey != nil {
+		key, err := r.multiclusterAccessKey(string(req.ClusterName), req.NamespacedName)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		accessKey.NamespacedName = key
+	}
 	t := tenant{
 		cli:                    cl.GetClient(),
-		accessKey:              tenantAccessKey(req),
+		accessKey:              accessKey,
 		requeueOnMissingConfig: true,
 	}
 	// Expose the tenant cluster to the provider's Reconciler implementation
@@ -122,10 +141,8 @@ func (r *APIReconciler[T, C]) reconcileMulticluster(ctx context.Context, mgr mcm
 // naming helper hashes the namespace (StableMCPNamespace, K8sNameUUID), so
 // the qualified value never has to be a valid namespace name, and "_" cannot
 // appear in a real namespace, so classic and multicluster identities cannot
-// collide. This is the same derivation the ControlPlane controller uses in
-// its kcp mode (StableMCPNamespaceCtx), so a service object and its
-// same-named ControlPlane in the same workspace resolve to the same
-// platform-side MCP namespace.
+// collide. A caller integrating an existing control-plane naming scheme can supply
+// MulticlusterAccessKey instead.
 func tenantAccessKey(req mcreconcile.Request) ctrl.Request {
 	out := ctrl.Request{NamespacedName: req.NamespacedName}
 	if req.ClusterName == "" {

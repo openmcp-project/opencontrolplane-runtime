@@ -38,3 +38,20 @@ Copyright OpenControlPlane contributors. Please see our [LICENSE](LICENSE) for c
 <p align="center">
   Copyright Linux Foundation Europe. For web site terms of use, trademark policy and other project policies please see <a href="https://linuxfoundation.eu/en/policies">https://linuxfoundation.eu/en/policies</a>.
 </p>
+## Multicluster service providers
+
+Use `MustBuildMulticluster` and `SetupWithMulticlusterManager` to reconcile service
+objects directly in multiple onboarding clusters. The caller supplies a
+multicluster-runtime manager and its cluster provider. The runtime has no KCP or
+installation-specific dependency.
+
+By default, platform access identities include the cluster name so identical
+object names in different tenants cannot collide. Installations with existing,
+globally unique onboarding namespaces can supply `MulticlusterAccessKey`. That
+mapper must validate the cluster-to-namespace registration before returning an
+identity; returning an error prevents access reconciliation for that object.
+
+Tenant removal does not imply successful service deletion. Delete service objects
+while their API is reachable, then remove the cluster registration. Unavailable
+clusters are retried; cleanup after permanent cluster loss belongs to the caller.
+The single-cluster builder and reconciler remain supported.

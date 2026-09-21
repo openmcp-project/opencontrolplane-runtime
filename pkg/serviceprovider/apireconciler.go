@@ -62,6 +62,8 @@ type APIReconciler[T API, C Config] struct {
 	// additionalDataGenerators is an optional list of functions which are called during reconciliation.
 	// Their outputs are collected and forwarded as additionalData to only the advanced cluster access reconciler.
 	additionalDataGenerators []func(ctx context.Context, obj T, config C) (any, error)
+	// multiclusterAccessKey optionally maps a tenant request to an existing platform identity.
+	multiclusterAccessKey func(string, client.ObjectKey) (client.ObjectKey, error)
 	// providerName
 	providerName string
 	// emptyConfig creates an empty object of the config type
