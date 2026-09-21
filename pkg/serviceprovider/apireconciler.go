@@ -48,6 +48,7 @@ type APIReconciler[T API, C Config] struct {
 	emptyObj func() T
 	// additionalDataGenerators is an optional list of functions which are called during reconciliation.
 	// Their outputs are collected and forwarded as additionalData to only the advanced cluster access reconciler.
+	// Note that any data generator error will be end user facing.
 	additionalDataGenerators []func(ctx context.Context, obj T, config C) (any, error)
 	// providerName
 	providerName string
@@ -202,7 +203,7 @@ func (r *APIReconciler[T, C]) Reconcile(ctx context.Context, req ctrl.Request) (
 	// generate additional data
 	additionalData, err := r.generateAdditionalData(ctx, obj, providerConfigCopy)
 	if err != nil {
-		StatusProgressing(obj, reasonReconcileError, "failed to generate additional data")
+		StatusProgressing(obj, reasonInvalidConfiguration, err.Error())
 		return ctrl.Result{}, err
 	}
 	// core crud
