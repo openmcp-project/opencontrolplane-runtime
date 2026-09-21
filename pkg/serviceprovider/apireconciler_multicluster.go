@@ -10,7 +10,6 @@ import (
 	mcbuilder "sigs.k8s.io/multicluster-runtime/pkg/builder"
 	mccontext "sigs.k8s.io/multicluster-runtime/pkg/context"
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
-	"sigs.k8s.io/multicluster-runtime/pkg/multicluster"
 	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 )
 
@@ -39,10 +38,9 @@ import (
 //   - Platform-side ProviderConfig / Secret / ConfigMap watches are not wired
 //     in this mode yet. A missing ProviderConfig is retried on a fixed
 //     interval; secret/configmap watching is rejected at build time.
-//   - Known limitation: when a tenant cluster disappears together with live
-//     API objects, in-flight requests trigger a best-effort cleanup of the
-//     platform-side access objects, but a full garbage collector for
-//     disengaged clusters is a follow-up.
+//   - A missing tenant cluster is retried without deleting access objects.
+//     Normal deletion must complete while the tenant API is available. Cleanup
+//     after permanent loss of a cluster requires an external collector.
 //
 // Usage (the provider construction is up to the service provider binary; the
 // library itself does not depend on kcp):
@@ -100,17 +98,8 @@ func (r *APIReconciler[T, C]) SetupWithMulticlusterManager(mgr mcmanager.Manager
 func (r *APIReconciler[T, C]) reconcileMulticluster(ctx context.Context, mgr mcmanager.Manager, req mcreconcile.Request) (ctrl.Result, error) {
 	cl, err := mgr.GetCluster(ctx, req.ClusterName)
 	if err != nil {
-		if errors.Is(err, multicluster.ErrClusterNotFound) {
-			// The tenant cluster is gone. Best-effort cleanup of the
-			// platform-side cluster access objects for this request; full
-			// garbage collection of access objects for disengaged clusters
-			// is a documented follow-up.
-			res, derr := r.clusterAccessProvider.ReconcileDelete(ctx, tenantAccessKey(req))
-			if derr != nil {
-				return ctrl.Result{}, derr
-			}
-			return res, nil
-		}
+		// An unavailable cluster does not prove deletion. AdditionalData may be
+		// required to identify access objects; do not guess an incomplete delete key.
 		return ctrl.Result{}, err
 	}
 	t := tenant{

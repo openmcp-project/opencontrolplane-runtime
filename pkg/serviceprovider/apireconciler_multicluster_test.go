@@ -1,17 +1,22 @@
 package serviceprovider
 
 import (
-	apiconst "github.com/openmcp-project/openmcp-operator/api/constants"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/event"
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/openmcp-project/controller-utils/pkg/clusters"
+	apiconst "github.com/openmcp-project/openmcp-operator/api/constants"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/cluster"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
+	"sigs.k8s.io/multicluster-runtime/pkg/multicluster"
 	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 )
 
@@ -146,5 +151,21 @@ func TestDefaultForPredicates(t *testing.T) {
 				t.Fatalf("enqueue = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// Embedding keeps unrelated manager methods unavailable to this regression test.
+type unavailableTenantManager struct{ mcmanager.Manager }
+
+func (unavailableTenantManager) GetCluster(context.Context, multicluster.ClusterName) (cluster.Cluster, error) {
+	return nil, multicluster.ErrClusterNotFound
+}
+func TestMissingTenantDoesNotGuessCleanupIdentity(t *testing.T) {
+	r := multiclusterTestBuilder(t).MustBuildMulticluster()
+	// Any attempted access cleanup would panic: no provider is available here.
+	r.clusterAccessProvider = nil
+	_, err := r.reconcileMulticluster(context.Background(), unavailableTenantManager{}, mcreconcile.Request{ClusterName: "gone"})
+	if !errors.Is(err, multicluster.ErrClusterNotFound) {
+		t.Fatalf("expected retryable missing cluster error, got %v", err)
 	}
 }
