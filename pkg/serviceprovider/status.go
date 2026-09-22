@@ -17,6 +17,7 @@ const (
 
 	reasonReconcileError           = "ReconcileError"
 	reasonWaitingForClusterContext = "WaitingForClusterContext"
+	reasonInvalidConfiguration     = "InvalidConfiguration"
 )
 
 // StatusProgressing indicates progressing with synced false
