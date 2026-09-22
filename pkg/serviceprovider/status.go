@@ -15,7 +15,9 @@ const (
 	// StatusPhaseTerminating indicates that the resource is not ready and in deletion.
 	StatusPhaseTerminating = "Terminating"
 
-	reasonReconcileError = "ReconcileError"
+	reasonReconcileError           = "ReconcileError"
+	reasonWaitingForClusterContext = "WaitingForClusterContext"
+	reasonInvalidConfiguration     = "InvalidConfiguration"
 )
 
 // StatusProgressing indicates progressing with synced false

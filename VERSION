@@ -1,0 +1,2 @@
+opencontrolplane-runtime does not use this file to create releases or build artifacts.
+This file only exists because it is required by shared build module tasks like generate.

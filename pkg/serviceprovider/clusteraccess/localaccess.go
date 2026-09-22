@@ -5,13 +5,14 @@ import (
 	"time"
 
 	"github.com/openmcp-project/controller-utils/pkg/clusters"
-	"github.com/openmcp-project/opencontrolplane-runtime/pkg/clusterprovider"
 	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
 	"github.com/openmcp-project/openmcp-operator/api/common"
 	"github.com/openmcp-project/openmcp-operator/lib/clusteraccess"
 	"k8s.io/apimachinery/pkg/runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"github.com/openmcp-project/opencontrolplane-runtime/pkg/clusterprovider"
 )
 
 var _ clusteraccess.Reconciler = &localClusterAccessReconciler{}

@@ -3,11 +3,11 @@ package serviceprovider
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/openmcp-project/controller-utils/pkg/clusters"
 	controllerutil2 "github.com/openmcp-project/controller-utils/pkg/controller"
-	"github.com/openmcp-project/opencontrolplane-runtime/pkg/serviceprovider/clusteraccess"
 	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
 	apiconst "github.com/openmcp-project/openmcp-operator/api/constants"
 	corev1 "k8s.io/api/core/v1"
@@ -24,6 +24,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
+
+	"github.com/openmcp-project/opencontrolplane-runtime/pkg/serviceprovider/clusteraccess"
 )
 
 // missingConfigRequeueInterval is the retry interval used while the
@@ -61,6 +63,7 @@ type APIReconciler[T API, C Config] struct {
 	emptyObj func() T
 	// additionalDataGenerators is an optional list of functions which are called during reconciliation.
 	// Their outputs are collected and forwarded as additionalData to only the advanced cluster access reconciler.
+	// Note that any data generator error will be end user facing.
 	additionalDataGenerators []func(ctx context.Context, obj T, config C) (any, error)
 	// multiclusterAccessKey optionally maps a tenant request to an existing platform identity.
 	multiclusterAccessKey func(string, client.ObjectKey) (client.ObjectKey, error)
@@ -128,7 +131,7 @@ func (b *APIReconcilerBuilder[T, C]) PlatformCluster(c *clusters.Cluster) *APIRe
 	return b
 }
 
-// OnboardingCluster set the onboarding cluster.
+// OnboardingCluster sets the onboarding cluster.
 func (b *APIReconcilerBuilder[T, C]) OnboardingCluster(c *clusters.Cluster) *APIReconcilerBuilder[T, C] {
 	b.apiReconciler.onboardingCluster = c
 	return b
@@ -246,7 +249,7 @@ func (r *APIReconciler[T, C]) reconcileTenant(ctx context.Context, t tenant, key
 	// generate additional data
 	additionalData, err := r.generateAdditionalData(ctx, obj, providerConfigCopy)
 	if err != nil {
-		StatusProgressing(obj, reasonReconcileError, "failed to generate additional data")
+		StatusProgressing(obj, reasonInvalidConfiguration, err.Error())
 		return ctrl.Result{}, err
 	}
 	// core crud
@@ -319,7 +322,7 @@ func (r *APIReconciler[T, C]) delete(ctx context.Context, t tenant, obj T, confi
 			return ctrl.Result{}, err
 		}
 		if res.RequeueAfter > 0 {
-			StatusTerminatingWithReason(obj, "Reconciling", "cluster cleanup")
+			StatusTerminatingWithReason(obj, reasonWaitingForClusterContext, r.waitingForClusterContextMessage(req))
 			return res, nil
 		}
 		res, err = r.reconciler.Delete(ctx, obj, config, clusterContext)
@@ -367,9 +370,19 @@ func (r *APIReconciler[T, C]) createOrUpdate(ctx context.Context, t tenant, obj 
 		return ctrl.Result{}, err
 	}
 	if res.RequeueAfter > 0 {
+		StatusProgressing(obj, reasonWaitingForClusterContext, r.waitingForClusterContextMessage(req))
 		return res, nil
 	}
 	return r.reconciler.CreateOrUpdate(ctx, obj, config, clusterContext)
+}
+
+// waitingForClusterContextMessage returns a user-facing message to identify issues like a non-matching request to ControlPlane mapping.
+func (r *APIReconciler[T, C]) waitingForClusterContextMessage(req ctrl.Request) string {
+	wlMsg := ""
+	if r.withWorkloadCluster {
+		wlMsg = " and workload cluster"
+	}
+	return fmt.Sprintf("Waiting for ControlPlane (%s/%s)%s to become accessible", req.Namespace, req.Name, wlMsg)
 }
 
 // areAccessRequestsInDeletion determines if the access requests for a reconcile request are in deletion.

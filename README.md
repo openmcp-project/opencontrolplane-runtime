@@ -4,12 +4,32 @@
 
 ## Development
 
-This project uses [task](https://taskfile.dev/) to generate test data and configure [envtest](https://sigs.k8s.io/controller-runtime/tools/setup-envtest). Execute the following two tasks to run the test suite:
+This project uses [task](https://taskfile.dev/) for code generation, validation, and tests. Run the following tasks:
 
-1. `task test:generate` to generate the test manifests with [controller-gen](https://sigs.k8s.io/controller-tools/cmd/controller-gen).
-2. `task envtest:setup` to configure envtest.
+1. `task generate` to update Go modules and apply formatting.
+2. `task test:generate` to regenerate testdata DeepCopy files and CRD manifests.
+3. `task validate` to run vet, lint, and import-format validation.
+4. `task test` to set up envtest and run the test suite.
 
-Then execute the test suite with `go test ./...`.
+The test task configures [envtest](https://sigs.k8s.io/controller-runtime/tools/setup-envtest) automatically.
+
+## Multicluster service providers
+
+Use `MustBuildMulticluster` and `SetupWithMulticlusterManager` to reconcile service
+objects directly in multiple onboarding clusters. The caller supplies a
+multicluster-runtime manager and its cluster provider. The runtime has no KCP or
+installation-specific dependency.
+
+By default, platform access identities include the cluster name so identical
+object names in different tenants cannot collide. Installations with existing,
+globally unique onboarding namespaces can supply `MulticlusterAccessKey`. That
+mapper must validate the cluster-to-namespace registration before returning an
+identity; returning an error prevents access reconciliation for that object.
+
+Tenant removal does not imply successful service deletion. Delete service objects
+while their API is reachable, then remove the cluster registration. Unavailable
+clusters are retried; cleanup after permanent cluster loss belongs to the caller.
+The single-cluster builder and reconciler remain supported.
 
 ## Support, Feedback, Contributing
 
@@ -38,20 +58,3 @@ Copyright OpenControlPlane contributors. Please see our [LICENSE](LICENSE) for c
 <p align="center">
   Copyright Linux Foundation Europe. For web site terms of use, trademark policy and other project policies please see <a href="https://linuxfoundation.eu/en/policies">https://linuxfoundation.eu/en/policies</a>.
 </p>
-## Multicluster service providers
-
-Use `MustBuildMulticluster` and `SetupWithMulticlusterManager` to reconcile service
-objects directly in multiple onboarding clusters. The caller supplies a
-multicluster-runtime manager and its cluster provider. The runtime has no KCP or
-installation-specific dependency.
-
-By default, platform access identities include the cluster name so identical
-object names in different tenants cannot collide. Installations with existing,
-globally unique onboarding namespaces can supply `MulticlusterAccessKey`. That
-mapper must validate the cluster-to-namespace registration before returning an
-identity; returning an error prevents access reconciliation for that object.
-
-Tenant removal does not imply successful service deletion. Delete service objects
-while their API is reachable, then remove the cluster registration. Unavailable
-clusters are retried; cleanup after permanent cluster loss belongs to the caller.
-The single-cluster builder and reconciler remain supported.
