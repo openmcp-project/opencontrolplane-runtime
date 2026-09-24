@@ -13,6 +13,24 @@ This project uses [task](https://taskfile.dev/) for code generation, validation,
 
 The test task configures [envtest](https://sigs.k8s.io/controller-runtime/tools/setup-envtest) automatically.
 
+## Multicluster service providers
+
+Use `MustBuildMulticluster` and `SetupWithMulticlusterManager` to reconcile service
+objects directly in multiple onboarding clusters. The caller supplies a
+multicluster-runtime manager and its cluster provider. The runtime has no KCP or
+installation-specific dependency.
+
+By default, platform access identities include the cluster name so identical
+object names in different tenants cannot collide. Installations with existing,
+globally unique onboarding namespaces can supply `MulticlusterAccessKey`. That
+mapper must validate the cluster-to-namespace registration before returning an
+identity; returning an error prevents access reconciliation for that object.
+
+Tenant removal does not imply successful service deletion. Delete service objects
+while their API is reachable, then remove the cluster registration. Unavailable
+clusters are retried; cleanup after permanent cluster loss belongs to the caller.
+The single-cluster builder and reconciler remain supported.
+
 ## Support, Feedback, Contributing
 
 This project is open to feature requests/suggestions, bug reports etc. via [GitHub issues](https://github.com/openmcp-project/opencontrolplane-runtime/issues). Contribution and feedback are encouraged and always welcome. For more information about how to contribute, the project structure, as well as additional contribution information, see our [Contribution Guidelines](https://github.com/openmcp-project/.github/blob/main/CONTRIBUTING.md).

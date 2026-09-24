@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/openmcp-project/controller-utils/pkg/clusters"
 	controllerutil2 "github.com/openmcp-project/controller-utils/pkg/controller"
@@ -26,6 +27,20 @@ import (
 
 	"github.com/openmcp-project/opencontrolplane-runtime/pkg/serviceprovider/clusteraccess"
 )
+
+// missingConfigRequeueInterval is the retry interval used while the
+// ProviderConfig is absent or in deletion, in modes without a config watch.
+const missingConfigRequeueInterval = 30 * time.Second
+
+// missingConfigRequeue returns the timed retry for a missing ProviderConfig:
+// zero in the classic mode (its config watch triggers the retry), a fixed
+// interval in the multicluster mode (which has no config watch).
+func (t tenant) missingConfigRequeue() time.Duration {
+	if t.requeueOnMissingConfig {
+		return missingConfigRequeueInterval
+	}
+	return 0
+}
 
 // APIReconciler implements a generic reconcile loop to separate platform
 // and service provider developer space.
@@ -50,6 +65,8 @@ type APIReconciler[T API, C Config] struct {
 	// Their outputs are collected and forwarded as additionalData to only the advanced cluster access reconciler.
 	// Note that any data generator error will be end user facing.
 	additionalDataGenerators []func(ctx context.Context, obj T, config C) (any, error)
+	// multiclusterAccessKey optionally maps a tenant request to an existing platform identity.
+	multiclusterAccessKey func(string, client.ObjectKey) (client.ObjectKey, error)
 	// providerName
 	providerName string
 	// emptyConfig creates an empty object of the config type
@@ -68,9 +85,8 @@ func NewAPIReconcilerBuilder[T API, C Config]() *APIReconcilerBuilder[T, C] {
 	}
 }
 
-// MustBuild validates every required field has been set and returns the APIReconciler.
-func (b *APIReconcilerBuilder[T, C]) MustBuild() *APIReconciler[T, C] {
-	// validate required fields
+// validateCommon panics on any missing field that both build variants require.
+func (b *APIReconcilerBuilder[T, C]) validateCommon() {
 	if b.apiReconciler.clusterAccessProvider == nil {
 		panic("cluster access provider is required")
 	}
@@ -80,14 +96,19 @@ func (b *APIReconcilerBuilder[T, C]) MustBuild() *APIReconciler[T, C] {
 	if b.apiReconciler.emptyConfig == nil {
 		panic("empty config provider is required")
 	}
-	if b.apiReconciler.onboardingCluster == nil {
-		panic("onboarding cluster is required")
-	}
 	if b.apiReconciler.platformCluster == nil {
 		panic("platform cluster is required")
 	}
 	if b.apiReconciler.reconciler == nil {
 		panic("reconciler is required")
+	}
+}
+
+// MustBuild validates every required field has been set and returns the APIReconciler.
+func (b *APIReconcilerBuilder[T, C]) MustBuild() *APIReconciler[T, C] {
+	b.validateCommon()
+	if b.apiReconciler.onboardingCluster == nil {
+		panic("onboarding cluster is required")
 	}
 	return &b.apiReconciler
 }
@@ -162,15 +183,40 @@ func (b *APIReconcilerBuilder[T, C]) AdditionalDataGenerators(generators ...func
 	return b
 }
 
+// tenant carries the per-request onboarding-side identity: the client to reach
+// the cluster (or kcp workspace) holding the reconciled object, and the request
+// key under which cluster access objects are named on the platform cluster.
+// In the classic single-onboarding-cluster mode both are static; in the
+// multicluster mode they are resolved per request.
+type tenant struct {
+	cli client.Client
+	// requeueOnMissingConfig requests a timed retry while the ProviderConfig
+	// is absent or in deletion. The multicluster mode sets it because it has
+	// no ProviderConfig watch; the classic mode relies on its watch instead.
+	requeueOnMissingConfig bool
+	// accessKey is the request identity used for naming ClusterRequests /
+	// AccessRequests on the platform cluster. In multicluster mode it carries
+	// a per-workspace prefix so identically named objects in different
+	// workspaces do not collide.
+	accessKey ctrl.Request
+}
+
 // Reconcile orchestrates platform and (domain specific) Reconciler logic to reconcile API objects
-func (r *APIReconciler[T, C]) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, reconcileErr error) {
+// in the classic single-onboarding-cluster mode.
+func (r *APIReconciler[T, C]) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	t := tenant{cli: r.onboardingCluster.Client(), accessKey: req}
+	return r.reconcileTenant(ctx, t, req.NamespacedName)
+}
+
+// reconcileTenant is the mode-independent reconcile core.
+func (r *APIReconciler[T, C]) reconcileTenant(ctx context.Context, t tenant, key client.ObjectKey) (_ ctrl.Result, reconcileErr error) {
 	l := logf.FromContext(ctx)
 	// common reconciler logic including get obj, providerconfig, mcp/workload access
 	obj := r.emptyObj()
-	if err := r.onboardingCluster.Client().Get(ctx, req.NamespacedName, obj); err != nil {
+	if err := t.cli.Get(ctx, key, obj); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	skip, err := r.handleOperationAnnotation(ctx, obj)
+	skip, err := r.handleOperationAnnotation(ctx, t, obj)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -181,7 +227,7 @@ func (r *APIReconciler[T, C]) Reconcile(ctx context.Context, req ctrl.Request) (
 	oldObj := obj.DeepCopyObject().(T)
 	// always try to update the obj status
 	defer func() {
-		if err := r.updateStatus(ctx, obj, oldObj); err != nil {
+		if err := r.updateStatus(ctx, t, obj, oldObj); err != nil {
 			l.Error(err, "status update failed")
 			reconcileErr = errors.Join(reconcileErr, err)
 		}
@@ -191,13 +237,13 @@ func (r *APIReconciler[T, C]) Reconcile(ctx context.Context, req ctrl.Request) (
 	if err := r.platformCluster.Client().Get(ctx, client.ObjectKeyFromObject(providerConfig), providerConfig); err != nil {
 		if apierrors.IsNotFound(err) {
 			StatusProgressing(obj, reasonReconcileError, "No ProviderConfig found")
-			return ctrl.Result{}, nil
+			return ctrl.Result{RequeueAfter: t.missingConfigRequeue()}, nil
 		}
 		return ctrl.Result{}, err
 	}
 	if !providerConfig.GetDeletionTimestamp().IsZero() {
 		StatusProgressing(obj, reasonReconcileError, "ProviderConfig is marked for deletion")
-		return ctrl.Result{}, nil
+		return ctrl.Result{RequeueAfter: t.missingConfigRequeue()}, nil
 	}
 	providerConfigCopy := providerConfig.DeepCopyObject().(C)
 	// generate additional data
@@ -210,9 +256,9 @@ func (r *APIReconciler[T, C]) Reconcile(ctx context.Context, req ctrl.Request) (
 	deleted := !obj.GetDeletionTimestamp().IsZero()
 	var res ctrl.Result
 	if deleted {
-		res, err = r.delete(ctx, obj, providerConfigCopy, additionalData)
+		res, err = r.delete(ctx, t, obj, providerConfigCopy, additionalData)
 	} else {
-		res, err = r.createOrUpdate(ctx, obj, providerConfigCopy, additionalData)
+		res, err = r.createOrUpdate(ctx, t, obj, providerConfigCopy, additionalData)
 	}
 	// return based on result/err
 	if err != nil {
@@ -228,7 +274,7 @@ func (r *APIReconciler[T, C]) Reconcile(ctx context.Context, req ctrl.Request) (
 	}, nil
 }
 
-func (r *APIReconciler[T, C]) handleOperationAnnotation(ctx context.Context, obj T) (bool, error) {
+func (r *APIReconciler[T, C]) handleOperationAnnotation(ctx context.Context, t tenant, obj T) (bool, error) {
 	annotations := obj.GetAnnotations()
 	if annotations == nil {
 		return false, nil
@@ -243,7 +289,7 @@ func (r *APIReconciler[T, C]) handleOperationAnnotation(ctx context.Context, obj
 		return true, nil
 	case apiconst.OperationAnnotationValueReconcile:
 		l.Info("Reconciliation requested via annotation. Removing annotation and proceeding with reconciliation")
-		if err := controllerutil2.EnsureAnnotation(ctx, r.onboardingCluster.Client(), obj, apiconst.OperationAnnotation, "", true, controllerutil2.DELETE); err != nil {
+		if err := controllerutil2.EnsureAnnotation(ctx, t.cli, obj, apiconst.OperationAnnotation, "", true, controllerutil2.DELETE); err != nil {
 			l.Error(err, "Failed to remove operation annotation")
 			return false, err
 		}
@@ -251,19 +297,19 @@ func (r *APIReconciler[T, C]) handleOperationAnnotation(ctx context.Context, obj
 	return false, nil
 }
 
-func (r *APIReconciler[T, PC]) updateStatus(ctx context.Context, newObj T, oldObj T) error {
+func (r *APIReconciler[T, PC]) updateStatus(ctx context.Context, t tenant, newObj T, oldObj T) error {
 	if equality.Semantic.DeepEqual(oldObj.GetStatus(), newObj.GetStatus()) {
 		return nil
 	}
-	err := r.onboardingCluster.Client().Status().Patch(ctx, newObj, client.MergeFrom(oldObj))
+	err := t.cli.Status().Patch(ctx, newObj, client.MergeFrom(oldObj))
 	// can't update status if object doesn't exist
 	return client.IgnoreNotFound(err)
 }
 
 // delete eventually invokes the domain delete logic of a service provider and is the place to implement
 // common logic that should be abstracted away from a service provider developer like handling cluster access.
-func (r *APIReconciler[T, C]) delete(ctx context.Context, obj T, config C, additionalData []any) (ctrl.Result, error) {
-	req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(obj)}
+func (r *APIReconciler[T, C]) delete(ctx context.Context, t tenant, obj T, config C, additionalData []any) (ctrl.Result, error) {
+	req := t.accessKey
 	accessRequestsInDeletion, err := r.areAccessRequestsInDeletion(ctx, req, additionalData)
 	if err != nil {
 		StatusProgressing(obj, reasonReconcileError, "failed to check access requests in deletion")
@@ -300,7 +346,7 @@ func (r *APIReconciler[T, C]) delete(ctx context.Context, obj T, config C, addit
 	}
 	// remove finalizer
 	controllerutil.RemoveFinalizer(obj, obj.Finalizer())
-	if err := r.onboardingCluster.Client().Update(ctx, obj); err != nil {
+	if err := t.cli.Update(ctx, obj); err != nil {
 		StatusTerminatingWithReason(obj, reasonReconcileError, "failed to remove finalizer")
 		return ctrl.Result{}, err
 	}
@@ -309,15 +355,15 @@ func (r *APIReconciler[T, C]) delete(ctx context.Context, obj T, config C, addit
 
 // createOrUpdate eventually invokes the domain createOrUpdate logic of a service provider and is the place to implement
 // common logic that should be abstracted away from a service provider developer like handling cluster access.
-func (r *APIReconciler[T, C]) createOrUpdate(ctx context.Context, obj T, config C, additionalData []any) (ctrl.Result, error) {
-	if _, err := controllerutil.CreateOrUpdate(ctx, r.onboardingCluster.Client(), obj, func() error {
+func (r *APIReconciler[T, C]) createOrUpdate(ctx context.Context, t tenant, obj T, config C, additionalData []any) (ctrl.Result, error) {
+	if _, err := controllerutil.CreateOrUpdate(ctx, t.cli, obj, func() error {
 		controllerutil.AddFinalizer(obj, obj.Finalizer())
 		return nil
 	}); err != nil {
 		StatusProgressing(obj, reasonReconcileError, "failed to add finalizer")
 		return ctrl.Result{}, err
 	}
-	req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(obj)}
+	req := t.accessKey
 	clusterContext, res, err := r.clusters(ctx, req, additionalData)
 	if err != nil {
 		StatusProgressing(obj, reasonReconcileError, "cluster setup error")
@@ -418,28 +464,31 @@ func WithForPredicates(predicates builder.Predicates) ControllerOption {
 	}
 }
 
-func defaultControllerConfig() *controllerConfig {
-	return &controllerConfig{
-		forPredicates: builder.WithPredicates(
-			predicate.And(
-				predicate.Or(
-					predicate.GenerationChangedPredicate{},
-					controllerutil2.DeletionTimestampChangedPredicate{},
-					predicate.LabelChangedPredicate{},
-					predicate.AnnotationChangedPredicate{},
-				),
-				predicate.Not(
-					controllerutil2.HasAnnotationPredicate(apiconst.OperationAnnotation, apiconst.OperationAnnotationValueIgnore),
-				),
+func defaultForPredicates() []predicate.Predicate {
+	return []predicate.Predicate{
+		predicate.And(
+			predicate.Or(
+				predicate.GenerationChangedPredicate{},
+				controllerutil2.DeletionTimestampChangedPredicate{},
+				predicate.LabelChangedPredicate{},
+				predicate.AnnotationChangedPredicate{},
 			),
+			predicate.Not(controllerutil2.HasAnnotationPredicate(apiconst.OperationAnnotation, apiconst.OperationAnnotationValueIgnore)),
 		),
 	}
+}
+
+func defaultControllerConfig() *controllerConfig {
+	return &controllerConfig{forPredicates: builder.WithPredicates(defaultForPredicates()...)}
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *APIReconciler[T, C]) SetupWithManager(mgr ctrl.Manager, providerName string, opts ...ControllerOption) error {
 	if providerName == "" {
 		return errors.New("provider name is required for manager setup")
+	}
+	if r.onboardingCluster == nil {
+		return errors.New("onboarding cluster is required for the classic setup; use SetupWithMulticlusterManager for reconcilers built with MustBuildMulticluster")
 	}
 	cfg := defaultControllerConfig()
 	for _, o := range opts {
