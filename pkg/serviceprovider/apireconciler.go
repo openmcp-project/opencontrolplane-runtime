@@ -336,7 +336,7 @@ func (r *APIReconciler[T, C]) waitingForClusterContextMessage(req ctrl.Request) 
 	if r.withWorkloadCluster {
 		wlMsg = " and workload cluster"
 	}
-	return fmt.Sprintf("Waiting for ControlPlane (%s/%s)%s to become accessible", req.Namespace, req.Name, wlMsg)
+	return fmt.Sprintf("Waiting for V2 ControlPlane (%s/%s)%s to become accessible", req.Namespace, req.Name, wlMsg)
 }
 
 // areAccessRequestsInDeletion determines if the access requests for a reconcile request are in deletion.
