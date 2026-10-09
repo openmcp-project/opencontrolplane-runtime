@@ -13,6 +13,10 @@ This project uses [task](https://taskfile.dev/) for code generation, validation,
 
 The test task configures [envtest](https://sigs.k8s.io/controller-runtime/tools/setup-envtest) automatically.
 
+## Metrics
+
+...
+
 ## Support, Feedback, Contributing
 
 This project is open to feature requests/suggestions, bug reports etc. via [GitHub issues](https://github.com/openmcp-project/opencontrolplane-runtime/issues). Contribution and feedback are encouraged and always welcome. For more information about how to contribute, the project structure, as well as additional contribution information, see our [Contribution Guidelines](https://github.com/openmcp-project/.github/blob/main/CONTRIBUTING.md).
