@@ -4,14 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/openmcp-project/controller-utils/pkg/clusters"
 	controllerutil2 "github.com/openmcp-project/controller-utils/pkg/controller"
 	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
 	apiconst "github.com/openmcp-project/openmcp-operator/api/constants"
+	"github.com/prometheus/client_golang/prometheus"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -20,12 +24,34 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/openmcp-project/opencontrolplane-runtime/pkg/serviceprovider/clusteraccess"
 )
+
+var (
+	timeToCreate = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: "opencontrolplane",
+		Subsystem: "runtime",
+		Name:      "time_to_create_seconds",
+		Help:      "time from create to ready in seconds",
+		Buckets:   prometheus.ExponentialBuckets(1, 2, 10),
+	})
+	timeToUpdate = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: "opencontrolplane",
+		Subsystem: "runtime",
+		Name:      "time_to_update_seconds",
+		Help:      "time from not ready to ready in seconds",
+		Buckets:   prometheus.ExponentialBuckets(1, 2, 10),
+	})
+)
+
+func init() {
+	metrics.Registry.MustRegister(timeToCreate, timeToUpdate)
+}
 
 // APIReconciler implements a generic reconcile loop to separate platform
 // and service provider developer space.
@@ -214,6 +240,7 @@ func (r *APIReconciler[T, C]) Reconcile(ctx context.Context, req ctrl.Request) (
 	} else {
 		res, err = r.createOrUpdate(ctx, obj, providerConfigCopy, additionalData)
 	}
+	r.observe(obj, *oldObj.GetConditions())
 	// return based on result/err
 	if err != nil {
 		l.Error(err, "reconcile failed")
@@ -226,6 +253,22 @@ func (r *APIReconciler[T, C]) Reconcile(ctx context.Context, req ctrl.Request) (
 	return ctrl.Result{
 		RequeueAfter: providerConfigCopy.PollInterval(),
 	}, nil
+}
+
+func (r *APIReconciler[T, C]) observe(obj T, old []metav1.Condition) {
+	oldReady := meta.IsStatusConditionTrue(old, "Ready")
+	newReady := meta.IsStatusConditionTrue(*obj.GetConditions(), "Ready")
+	if !oldReady && newReady && obj.GetGeneration() == 1 {
+		oldReady := meta.FindStatusCondition(old, "Ready")
+		if oldReady != nil {
+			timeToCreate.Observe(time.Since(oldReady.LastTransitionTime.Time).Seconds())
+		}
+	} else if !oldReady && newReady {
+		oldReady := meta.FindStatusCondition(old, "Ready")
+		if oldReady != nil {
+			timeToUpdate.Observe(time.Since(oldReady.LastTransitionTime.Time).Seconds())
+		}
+	}
 }
 
 func (r *APIReconciler[T, C]) handleOperationAnnotation(ctx context.Context, obj T) (bool, error) {
