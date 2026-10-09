@@ -36,15 +36,15 @@ var (
 	timeToCreate = prometheus.NewHistogram(prometheus.HistogramOpts{
 		Namespace: "opencontrolplane",
 		Subsystem: "runtime",
-		Name:      "time_to_create_seconds",
-		Help:      "time from create to ready in seconds",
+		Name:      "resource_create_seconds",
+		Help:      "time to create a resource to ready in seconds",
 		Buckets:   prometheus.ExponentialBuckets(1, 2, 10),
 	})
 	timeToUpdate = prometheus.NewHistogram(prometheus.HistogramOpts{
 		Namespace: "opencontrolplane",
 		Subsystem: "runtime",
-		Name:      "time_to_update_seconds",
-		Help:      "time from not ready to ready in seconds",
+		Name:      "resource_update_seconds",
+		Help:      "time to update a resource to ready in seconds",
 		Buckets:   prometheus.ExponentialBuckets(1, 2, 10),
 	})
 )
