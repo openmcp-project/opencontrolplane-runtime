@@ -303,8 +303,9 @@ func (r *APIReconciler[T, C]) handleOperationAnnotation(ctx context.Context, obj
 func (r *APIReconciler[T, PC]) updateStatusAndObserve(ctx context.Context, newObj T, oldObj T) error {
 	// calc observation to separate observation from status update (to prevent double counting on status update error, we prefer missed observations)
 	create, update := r.calcObservations(newObj, *oldObj.GetConditions())
-	// add updating condition
-	if newObj.GetGeneration() != oldObj.GetGeneration() {
+	// add updating condition if generation changed
+	oldReadyCondition := meta.FindStatusCondition(*oldObj.GetConditions(), ServiceProviderConditionReady)
+	if oldReadyCondition != nil && newObj.GetGeneration() != oldReadyCondition.ObservedGeneration {
 		// updating condition is used to measure update times from update start to ready
 		statusUpdating(newObj)
 	}
