@@ -207,7 +207,7 @@ func (r *APIReconciler[T, C]) Reconcile(ctx context.Context, req ctrl.Request) (
 	oldObj := obj.DeepCopyObject().(T)
 	// always try to update the obj status
 	defer func() {
-		if err := r.updateStatus(ctx, obj, oldObj); err != nil {
+		if err := r.updateStatusAndObserve(ctx, obj, oldObj); err != nil {
 			l.Error(err, "status update failed")
 			reconcileErr = errors.Join(reconcileErr, err)
 		}
@@ -240,7 +240,6 @@ func (r *APIReconciler[T, C]) Reconcile(ctx context.Context, req ctrl.Request) (
 	} else {
 		res, err = r.createOrUpdate(ctx, obj, providerConfigCopy, additionalData)
 	}
-	r.observe(obj, *oldObj.GetConditions())
 	// return based on result/err
 	if err != nil {
 		l.Error(err, "reconcile failed")
@@ -255,19 +254,26 @@ func (r *APIReconciler[T, C]) Reconcile(ctx context.Context, req ctrl.Request) (
 	}, nil
 }
 
-func (r *APIReconciler[T, C]) observe(obj T, old []metav1.Condition) {
-	oldReady := meta.IsStatusConditionTrue(old, "Ready")
-	newReady := meta.IsStatusConditionTrue(*obj.GetConditions(), "Ready")
-	if !oldReady && newReady && obj.GetGeneration() == 1 {
-		oldReady := meta.FindStatusCondition(old, "Ready")
-		if oldReady != nil {
-			timeToCreate.Observe(time.Since(oldReady.LastTransitionTime.Time).Seconds())
+func (r *APIReconciler[T, C]) calcObservations(obj T, old []metav1.Condition) (create, update time.Duration) {
+	wasReady := meta.IsStatusConditionTrue(old, ServiceProviderConditionReady)
+	isReady := meta.IsStatusConditionTrue(*obj.GetConditions(), ServiceProviderConditionReady)
+	if !wasReady && isReady && obj.GetGeneration() == 1 {
+		create = time.Since(obj.GetCreationTimestamp().Time)
+	} else if !wasReady && isReady {
+		updating := meta.FindStatusCondition(*obj.GetConditions(), serviceProviderConditionUpdating)
+		if updating != nil {
+			update = time.Since(updating.LastTransitionTime.Time)
 		}
-	} else if !oldReady && newReady {
-		oldReady := meta.FindStatusCondition(old, "Ready")
-		if oldReady != nil {
-			timeToUpdate.Observe(time.Since(oldReady.LastTransitionTime.Time).Seconds())
-		}
+	}
+	return
+}
+
+func (r *APIReconciler[T, C]) observe(create, update time.Duration) {
+	if create != 0 {
+		timeToCreate.Observe(create.Seconds())
+	}
+	if update != 0 {
+		timeToUpdate.Observe(update.Seconds())
 	}
 }
 
@@ -294,11 +300,25 @@ func (r *APIReconciler[T, C]) handleOperationAnnotation(ctx context.Context, obj
 	return false, nil
 }
 
-func (r *APIReconciler[T, PC]) updateStatus(ctx context.Context, newObj T, oldObj T) error {
+func (r *APIReconciler[T, PC]) updateStatusAndObserve(ctx context.Context, newObj T, oldObj T) error {
+	// calc observation to separate observation from status update (to prevent double counting on status update error, we prefer missed observations)
+	create, update := r.calcObservations(newObj, *oldObj.GetConditions())
+	// add updating condition
+	if newObj.GetGeneration() != oldObj.GetGeneration() {
+		// updating condition is used to measure update times from update start to ready
+		statusUpdating(newObj)
+	}
+	// drop updating condition
+	if update != 0 {
+		meta.RemoveStatusCondition(newObj.GetConditions(), serviceProviderConditionUpdating)
+	}
 	if equality.Semantic.DeepEqual(oldObj.GetStatus(), newObj.GetStatus()) {
 		return nil
 	}
 	err := r.onboardingCluster.Client().Status().Patch(ctx, newObj, client.MergeFrom(oldObj))
+	if err == nil {
+		r.observe(create, update)
+	}
 	// can't update status if object doesn't exist
 	return client.IgnoreNotFound(err)
 }
