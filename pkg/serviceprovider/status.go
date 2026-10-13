@@ -8,6 +8,8 @@ import (
 const (
 	// ServiceProviderConditionReady is the condition type used when reporting status
 	ServiceProviderConditionReady = "Ready"
+	// ServiceProviderConditionUpdating is the condition type used when reporting status
+	serviceProviderConditionUpdating = "Updating"
 	// StatusPhaseReady indicates that the resource is ready. All conditions are met and are in status "True".
 	StatusPhaseReady = "Ready"
 	// StatusPhaseProgressing indicates that the resource is not ready and being created or updated.
@@ -70,4 +72,14 @@ func StatusTerminatingWithReason(obj API, reason, message string) {
 	})
 	obj.SetObservedGeneration(obj.GetGeneration())
 	obj.SetPhase(StatusPhaseTerminating)
+}
+
+func statusUpdating(obj API) {
+	meta.SetStatusCondition(obj.GetConditions(), metav1.Condition{
+		Type:               serviceProviderConditionUpdating,
+		Status:             metav1.ConditionTrue,
+		ObservedGeneration: obj.GetGeneration(),
+		Reason:             "GenerationChanged",
+		Message:            "Update in progress",
+	})
 }

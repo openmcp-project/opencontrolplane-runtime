@@ -4,14 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/openmcp-project/controller-utils/pkg/clusters"
 	controllerutil2 "github.com/openmcp-project/controller-utils/pkg/controller"
 	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
 	apiconst "github.com/openmcp-project/openmcp-operator/api/constants"
+	"github.com/prometheus/client_golang/prometheus"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -20,12 +24,34 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/openmcp-project/opencontrolplane-runtime/pkg/serviceprovider/clusteraccess"
 )
+
+var (
+	timeToCreate = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: "opencontrolplane",
+		Subsystem: "runtime",
+		Name:      "resource_create_seconds",
+		Help:      "time to create a resource to ready in seconds",
+		Buckets:   prometheus.ExponentialBuckets(1, 2, 10),
+	})
+	timeToUpdate = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: "opencontrolplane",
+		Subsystem: "runtime",
+		Name:      "resource_update_seconds",
+		Help:      "time to update a resource to ready in seconds",
+		Buckets:   prometheus.ExponentialBuckets(1, 2, 10),
+	})
+)
+
+func init() {
+	metrics.Registry.MustRegister(timeToCreate, timeToUpdate)
+}
 
 // APIReconciler implements a generic reconcile loop to separate platform
 // and service provider developer space.
@@ -181,7 +207,7 @@ func (r *APIReconciler[T, C]) Reconcile(ctx context.Context, req ctrl.Request) (
 	oldObj := obj.DeepCopyObject().(T)
 	// always try to update the obj status
 	defer func() {
-		if err := r.updateStatus(ctx, obj, oldObj); err != nil {
+		if err := r.updateStatusAndObserve(ctx, obj, oldObj); err != nil {
 			l.Error(err, "status update failed")
 			reconcileErr = errors.Join(reconcileErr, err)
 		}
@@ -228,6 +254,29 @@ func (r *APIReconciler[T, C]) Reconcile(ctx context.Context, req ctrl.Request) (
 	}, nil
 }
 
+func (r *APIReconciler[T, C]) calcObservations(obj T, old []metav1.Condition) (create, update time.Duration) {
+	wasReady := meta.IsStatusConditionTrue(old, ServiceProviderConditionReady)
+	isReady := meta.IsStatusConditionTrue(*obj.GetConditions(), ServiceProviderConditionReady)
+	if !wasReady && isReady && obj.GetGeneration() == 1 {
+		create = time.Since(obj.GetCreationTimestamp().Time)
+	} else if !wasReady && isReady {
+		updating := meta.FindStatusCondition(*obj.GetConditions(), serviceProviderConditionUpdating)
+		if updating != nil {
+			update = time.Since(updating.LastTransitionTime.Time)
+		}
+	}
+	return
+}
+
+func (r *APIReconciler[T, C]) observe(create, update time.Duration) {
+	if create != 0 {
+		timeToCreate.Observe(create.Seconds())
+	}
+	if update != 0 {
+		timeToUpdate.Observe(update.Seconds())
+	}
+}
+
 func (r *APIReconciler[T, C]) handleOperationAnnotation(ctx context.Context, obj T) (bool, error) {
 	annotations := obj.GetAnnotations()
 	if annotations == nil {
@@ -251,11 +300,26 @@ func (r *APIReconciler[T, C]) handleOperationAnnotation(ctx context.Context, obj
 	return false, nil
 }
 
-func (r *APIReconciler[T, PC]) updateStatus(ctx context.Context, newObj T, oldObj T) error {
+func (r *APIReconciler[T, PC]) updateStatusAndObserve(ctx context.Context, newObj T, oldObj T) error {
+	// calc observation to separate observation from status update (to prevent double counting on status update error, we prefer missed observations)
+	create, update := r.calcObservations(newObj, *oldObj.GetConditions())
+	// add updating condition if generation changed
+	oldReadyCondition := meta.FindStatusCondition(*oldObj.GetConditions(), ServiceProviderConditionReady)
+	if oldReadyCondition != nil && newObj.GetGeneration() != oldReadyCondition.ObservedGeneration {
+		// updating condition is used to measure update times from update start to ready
+		statusUpdating(newObj)
+	}
+	// drop updating condition
+	if update != 0 {
+		meta.RemoveStatusCondition(newObj.GetConditions(), serviceProviderConditionUpdating)
+	}
 	if equality.Semantic.DeepEqual(oldObj.GetStatus(), newObj.GetStatus()) {
 		return nil
 	}
 	err := r.onboardingCluster.Client().Status().Patch(ctx, newObj, client.MergeFrom(oldObj))
+	if err == nil {
+		r.observe(create, update)
+	}
 	// can't update status if object doesn't exist
 	return client.IgnoreNotFound(err)
 }
