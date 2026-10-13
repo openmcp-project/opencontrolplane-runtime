@@ -15,7 +15,12 @@ The test task configures [envtest](https://sigs.k8s.io/controller-runtime/tools/
 
 ## Metrics
 
-...
+The following metrics are exported by `opencontrolplane-runtime`:
+
+| Name                                             | Type      | Description                                                                        |
+| ------------------------------------------------ | --------- | ---------------------------------------------------------------------------------- |
+| opencontrolplane_runtime_resource_create_seconds | Histogram | Time to create a resource to ready in seconds (based on object creation timestamp) |
+| opencontrolplane_runtime_resource_update_seconds | Histogram | Time to update a resource to ready in seconds (based on object generation changes) |
 
 ## Support, Feedback, Contributing
 
