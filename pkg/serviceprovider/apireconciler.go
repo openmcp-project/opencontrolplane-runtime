@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/openmcp-project/controller-utils/pkg/clusters"
 	controllerutil2 "github.com/openmcp-project/controller-utils/pkg/controller"
@@ -12,7 +13,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/util/wait"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -25,6 +28,18 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/openmcp-project/opencontrolplane-runtime/pkg/serviceprovider/clusteraccess"
+)
+
+const (
+	// DefaultRequeueInterval is the interval after which ready objects are requeued if the Reconciler
+	// does not return a RequeueAfter. Resources managed on remote clusters are not watched, so this
+	// periodic reconciliation is what corrects their drift.
+	DefaultRequeueInterval = 30 * time.Minute
+	// notReadyRequeueInterval is the interval after which objects that are not ready are requeued if the
+	// Reconciler does not return a RequeueAfter, e.g. while waiting for a remote resource to become ready.
+	notReadyRequeueInterval = time.Minute
+	// requeueJitterFactor adds up to 20% to the requeue interval of ready objects to spread their reconciliations.
+	requeueJitterFactor = 0.2
 )
 
 // APIReconciler implements a generic reconcile loop to separate platform
@@ -54,6 +69,8 @@ type APIReconciler[T API, C Config] struct {
 	providerName string
 	// emptyConfig creates an empty object of the config type
 	emptyConfig func() C
+	// requeueInterval is the interval after which ready objects are requeued if the Reconciler does not return a RequeueAfter.
+	requeueInterval time.Duration
 }
 
 // APIReconcilerBuilder enables building valid APIReconcilers.
@@ -64,7 +81,9 @@ type APIReconcilerBuilder[T API, C Config] struct {
 // NewAPIReconcilerBuilder creates a builder.
 func NewAPIReconcilerBuilder[T API, C Config]() *APIReconcilerBuilder[T, C] {
 	return &APIReconcilerBuilder[T, C]{
-		apiReconciler: APIReconciler[T, C]{},
+		apiReconciler: APIReconciler[T, C]{
+			requeueInterval: DefaultRequeueInterval,
+		},
 	}
 }
 
@@ -88,6 +107,9 @@ func (b *APIReconcilerBuilder[T, C]) MustBuild() *APIReconciler[T, C] {
 	}
 	if b.apiReconciler.reconciler == nil {
 		panic("reconciler is required")
+	}
+	if b.apiReconciler.requeueInterval <= 0 {
+		panic("requeue interval must be positive")
 	}
 	return &b.apiReconciler
 }
@@ -162,6 +184,13 @@ func (b *APIReconcilerBuilder[T, C]) AdditionalDataGenerators(generators ...func
 	return b
 }
 
+// RequeueInterval overrides the DefaultRequeueInterval after which ready objects are requeued
+// if the Reconciler does not return a RequeueAfter.
+func (b *APIReconcilerBuilder[T, C]) RequeueInterval(interval time.Duration) *APIReconcilerBuilder[T, C] {
+	b.apiReconciler.requeueInterval = interval
+	return b
+}
+
 // Reconcile orchestrates platform and (domain specific) Reconciler logic to reconcile API objects
 func (r *APIReconciler[T, C]) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, reconcileErr error) {
 	l := logf.FromContext(ctx)
@@ -222,10 +251,22 @@ func (r *APIReconciler[T, C]) Reconcile(ctx context.Context, req ctrl.Request) (
 	if res.RequeueAfter > 0 {
 		return res, nil
 	}
-	// fallback to poll interval to prevent 'managed service' drift
 	return ctrl.Result{
-		RequeueAfter: providerConfigCopy.PollInterval(),
+		RequeueAfter: r.requeueAfterFor(obj),
 	}, nil
+}
+
+// requeueAfterFor returns the requeue interval for an object if the reconciler does not return a RequeueAfter. It is based on the Ready condition of the object.
+func (r *APIReconciler[T, C]) requeueAfterFor(obj T) time.Duration {
+	conditions := obj.GetConditions()
+	if conditions == nil {
+		return notReadyRequeueInterval
+	}
+	isReady := meta.IsStatusConditionTrue(*conditions, ServiceProviderConditionReady)
+	if isReady {
+		return wait.Jitter(r.requeueInterval, requeueJitterFactor)
+	}
+	return notReadyRequeueInterval
 }
 
 func (r *APIReconciler[T, C]) handleOperationAnnotation(ctx context.Context, obj T) (bool, error) {

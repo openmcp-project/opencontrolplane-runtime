@@ -2,7 +2,6 @@ package serviceprovider
 
 import (
 	"context"
-	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -42,7 +41,4 @@ type Status interface {
 // The Config is passed to the Reconciler to reconcile API objects
 type Config interface {
 	client.Object
-	// PollInterval can be used to periodically requeue, preventing managed objects
-	// from drifting on the target cluster.  Return 0 if not required.
-	PollInterval() time.Duration
 }

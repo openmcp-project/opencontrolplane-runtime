@@ -41,11 +41,10 @@ spec:
           spec:
             description: spec defines the desired state of ProviderConfig
             properties:
-              pollInterval:
-                default: 1m
+              foo:
+                default: bar
                 description: foo is an example field of ProviderConfig. Edit providerconfig_types.go
                   to remove/update
-                format: duration
                 type: string
             type: object
           status:
