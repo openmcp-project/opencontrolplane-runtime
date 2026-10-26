@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/openmcp-project/controller-utils/pkg/clusters"
@@ -35,6 +36,9 @@ const (
 	// does not return a RequeueAfter. Resources managed on remote clusters are not watched, so this
 	// periodic reconciliation is what corrects their drift.
 	DefaultRequeueInterval = 30 * time.Minute
+	// RequeueIntervalOverrideEnvVar names the environment variable that overrides the requeue interval
+	// of ready objects, including an interval set via the builder. The value is a Go duration, e.g. "10m".
+	RequeueIntervalOverrideEnvVar = "REQUEUE_INTERVAL_OVERRIDE"
 	// notReadyRequeueInterval is the interval after which objects that are not ready are requeued if the
 	// Reconciler does not return a RequeueAfter, e.g. while waiting for a remote resource to become ready.
 	notReadyRequeueInterval = time.Minute
@@ -111,6 +115,12 @@ func (b *APIReconcilerBuilder[T, C]) MustBuild() *APIReconciler[T, C] {
 	if b.apiReconciler.requeueInterval <= 0 {
 		panic("requeue interval must be positive")
 	}
+	// the environment overrides the requeue interval set by the builder, if any. This is useful for testing and debugging.
+	requeueInterval, err := requeueIntervalFromEnv(b.apiReconciler.requeueInterval)
+	if err != nil {
+		panic(err.Error())
+	}
+	b.apiReconciler.requeueInterval = requeueInterval
 	return &b.apiReconciler
 }
 
@@ -189,6 +199,23 @@ func (b *APIReconcilerBuilder[T, C]) AdditionalDataGenerators(generators ...func
 func (b *APIReconcilerBuilder[T, C]) RequeueInterval(interval time.Duration) *APIReconcilerBuilder[T, C] {
 	b.apiReconciler.requeueInterval = interval
 	return b
+}
+
+// requeueIntervalFromEnv returns the requeue interval set via RequeueIntervalOverrideEnvVar,
+// or the given interval if the variable is unset or empty.
+func requeueIntervalFromEnv(interval time.Duration) (time.Duration, error) {
+	value, ok := os.LookupEnv(RequeueIntervalOverrideEnvVar)
+	if !ok || value == "" {
+		return interval, nil
+	}
+	override, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s %q: %w", RequeueIntervalOverrideEnvVar, value, err)
+	}
+	if override <= 0 {
+		return 0, fmt.Errorf("invalid %s %q: must be positive", RequeueIntervalOverrideEnvVar, value)
+	}
+	return override, nil
 }
 
 // Reconcile orchestrates platform and (domain specific) Reconciler logic to reconcile API objects

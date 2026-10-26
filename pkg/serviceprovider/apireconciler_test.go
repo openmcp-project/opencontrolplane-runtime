@@ -3,6 +3,7 @@ package serviceprovider
 import (
 	"context"
 	"errors"
+	"os"
 	"slices"
 	"testing"
 	"time"
@@ -649,6 +650,8 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 		reconcilerRequeueAfter time.Duration
 		// requeueInterval overrides the default requeue interval via the builder.
 		requeueInterval time.Duration
+		// requeueIntervalOverride sets RequeueIntervalOverrideEnvVar.
+		requeueIntervalOverride string
 		// clusterAccessDeleted makes the fake cluster access provider finish the deletion of cluster access.
 		clusterAccessDeleted bool
 	}{
@@ -959,6 +962,55 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 			requeueInterval:     2 * time.Hour,
 		},
 		{
+			name: "CreateOrUpdate ok and ready with requeue interval override -> requeue with jittered override",
+			apiObj: &fakeApiImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+				},
+			},
+			req: ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+				},
+			},
+			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
+			},
+			wantJitteredRequeue:     10 * time.Minute,
+			wantStatusPhase:         StatusPhaseReady,
+			wantReconciliation:      true,
+			requeueIntervalOverride: "10m",
+		},
+		{
+			name: "CreateOrUpdate ok and ready with custom requeue interval and override -> override wins",
+			apiObj: &fakeApiImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+				},
+			},
+			req: ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+				},
+			},
+			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
+			},
+			wantJitteredRequeue:     10 * time.Minute,
+			wantStatusPhase:         StatusPhaseReady,
+			wantReconciliation:      true,
+			requeueInterval:         2 * time.Hour,
+			requeueIntervalOverride: "10m",
+		},
+		{
 			name: "Delete finished -> finalizer removed, requeue with not ready interval",
 			apiObj: &fakeApiImpl{
 				ObjectMeta: metav1.ObjectMeta{
@@ -990,6 +1042,9 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.requeueIntervalOverride != "" {
+				t.Setenv(RequeueIntervalOverrideEnvVar, tt.requeueIntervalOverride)
+			}
 			onboardingCluster := createFakeCluster(t, "onboarding", tt.apiObj)
 			platformCluster := createFakeCluster(t, "platform")
 			mockReconciler := &MockServiceProviderReconciler{
@@ -1208,6 +1263,66 @@ func createFakeClusterWithUnstructuredList(t *testing.T, id string, objs []clien
 		}).
 		Build()
 	return clusters.NewTestClusterFromClient(id, fakeClient)
+}
+
+func TestRequeueIntervalFromEnv(t *testing.T) {
+	tests := []struct {
+		name string
+		// set makes the test set RequeueIntervalOverrideEnvVar to value.
+		set     bool
+		value   string
+		want    time.Duration
+		wantErr bool
+	}{
+		{name: "unset -> given interval", want: DefaultRequeueInterval},
+		{name: "empty -> given interval", set: true, value: "", want: DefaultRequeueInterval},
+		{name: "valid duration -> override", set: true, value: "10m", want: 10 * time.Minute},
+		{name: "missing unit -> error", set: true, value: "30", wantErr: true},
+		{name: "not a duration -> error", set: true, value: "abc", wantErr: true},
+		{name: "zero -> error", set: true, value: "0s", wantErr: true},
+		{name: "negative -> error", set: true, value: "-1m", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// t.Setenv restores the original value after the test, also when unsetting it below
+			t.Setenv(RequeueIntervalOverrideEnvVar, tt.value)
+			if !tt.set {
+				require.NoError(t, os.Unsetenv(RequeueIntervalOverrideEnvVar))
+			}
+			got, err := requeueIntervalFromEnv(DefaultRequeueInterval)
+			if tt.wantErr {
+				assert.ErrorContains(t, err, RequeueIntervalOverrideEnvVar)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestAPIReconcilerBuilder_MustBuild_InvalidRequeueIntervalOverride(t *testing.T) {
+	t.Setenv(RequeueIntervalOverrideEnvVar, "abc")
+	builder := NewAPIReconcilerBuilder[*fakeApiImpl, *fakeProviderConfigImpl]().
+		EmptyObjectProvider(func() *fakeApiImpl { return &fakeApiImpl{} }).
+		EmptyConfigProvider(func() *fakeProviderConfigImpl { return &fakeProviderConfigImpl{} }).
+		OnboardingCluster(createFakeCluster(t, "onboarding")).
+		PlatformCluster(createFakeCluster(t, "platform")).
+		AdvancedClusterAccessReconciler(FakeAdvancedClusterAccessProvider{}).
+		Reconciler(&MockServiceProviderReconciler{})
+	assert.Panics(t, func() { builder.MustBuild() })
+}
+
+func TestAPIReconcilerBuilder_MustBuild_InvalidRequeueIntervalWithValidOverride(t *testing.T) {
+	t.Setenv(RequeueIntervalOverrideEnvVar, "1m")
+	builder := NewAPIReconcilerBuilder[*fakeApiImpl, *fakeProviderConfigImpl]().
+		EmptyObjectProvider(func() *fakeApiImpl { return &fakeApiImpl{} }).
+		EmptyConfigProvider(func() *fakeProviderConfigImpl { return &fakeProviderConfigImpl{} }).
+		OnboardingCluster(createFakeCluster(t, "onboarding")).
+		PlatformCluster(createFakeCluster(t, "platform")).
+		AdvancedClusterAccessReconciler(FakeAdvancedClusterAccessProvider{}).
+		Reconciler(&MockServiceProviderReconciler{}).
+		RequeueInterval(-time.Minute)
+	assert.Panics(t, func() { builder.MustBuild() })
 }
 
 func TestMapSecretToRequests(t *testing.T) {
