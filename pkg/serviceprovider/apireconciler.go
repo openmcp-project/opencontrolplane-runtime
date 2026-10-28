@@ -14,7 +14,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/wait"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -32,17 +31,14 @@ import (
 )
 
 const (
-	// DefaultRequeueInterval is the interval after which ready objects are requeued if the Reconciler
+	// DefaultRequeueInterval is the interval after which objects are requeued if the Reconciler
 	// does not return a RequeueAfter. Resources managed on remote clusters are not watched, so this
 	// periodic reconciliation is what corrects their drift.
 	DefaultRequeueInterval = 30 * time.Minute
-	// RequeueIntervalOverrideEnvVar names the environment variable that overrides the requeue interval
-	// of ready objects, including an interval set via the builder. The value is a Go duration, e.g. "10m".
+	// RequeueIntervalOverrideEnvVar names the environment variable that overrides the requeue interval,
+	// including an interval set via the builder. The value is a Go duration, e.g. "10m".
 	RequeueIntervalOverrideEnvVar = "REQUEUE_INTERVAL_OVERRIDE"
-	// notReadyRequeueInterval is the interval after which objects that are not ready are requeued if the
-	// Reconciler does not return a RequeueAfter, e.g. while waiting for a remote resource to become ready.
-	notReadyRequeueInterval = time.Minute
-	// requeueJitterFactor adds up to 20% to the requeue interval of ready objects to spread their reconciliations.
+	// requeueJitterFactor adds up to 20% to the requeue interval to spread reconciliations.
 	requeueJitterFactor = 0.2
 )
 
@@ -73,7 +69,7 @@ type APIReconciler[T API, C Config] struct {
 	providerName string
 	// emptyConfig creates an empty object of the config type
 	emptyConfig func() C
-	// requeueInterval is the interval after which ready objects are requeued if the Reconciler does not return a RequeueAfter.
+	// requeueInterval is the interval after which objects are requeued if the Reconciler does not return a RequeueAfter.
 	requeueInterval time.Duration
 }
 
@@ -194,7 +190,7 @@ func (b *APIReconcilerBuilder[T, C]) AdditionalDataGenerators(generators ...func
 	return b
 }
 
-// RequeueInterval overrides the DefaultRequeueInterval after which ready objects are requeued
+// RequeueInterval overrides the DefaultRequeueInterval after which objects are requeued
 // if the Reconciler does not return a RequeueAfter.
 func (b *APIReconcilerBuilder[T, C]) RequeueInterval(interval time.Duration) *APIReconcilerBuilder[T, C] {
 	b.apiReconciler.requeueInterval = interval
@@ -278,22 +274,10 @@ func (r *APIReconciler[T, C]) Reconcile(ctx context.Context, req ctrl.Request) (
 	if res.RequeueAfter > 0 {
 		return res, nil
 	}
+	// fallback to the requeue interval to prevent 'managed service' drift
 	return ctrl.Result{
-		RequeueAfter: r.requeueAfterFor(obj),
+		RequeueAfter: wait.Jitter(r.requeueInterval, requeueJitterFactor),
 	}, nil
-}
-
-// requeueAfterFor returns the requeue interval for an object if the reconciler does not return a RequeueAfter. It is based on the Ready condition of the object.
-func (r *APIReconciler[T, C]) requeueAfterFor(obj T) time.Duration {
-	conditions := obj.GetConditions()
-	if conditions == nil {
-		return notReadyRequeueInterval
-	}
-	isReady := meta.IsStatusConditionTrue(*conditions, ServiceProviderConditionReady)
-	if isReady {
-		return wait.Jitter(r.requeueInterval, requeueJitterFactor)
-	}
-	return notReadyRequeueInterval
 }
 
 func (r *APIReconciler[T, C]) handleOperationAnnotation(ctx context.Context, obj T) (bool, error) {

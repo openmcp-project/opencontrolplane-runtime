@@ -886,7 +886,7 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 			wantErr:            true,
 		},
 		{
-			name: "CreateOrUpdate ok but not ready -> requeue with not ready interval",
+			name: "CreateOrUpdate ok but not ready -> requeue with jittered default requeue interval",
 			apiObj: &fakeApiImpl{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      testObjectName,
@@ -904,12 +904,10 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 					Name: testObjectName,
 				},
 			},
-			want: ctrl.Result{
-				RequeueAfter: notReadyRequeueInterval,
-			},
-			wantStatusPhase:    StatusPhaseProgressing,
-			wantReconciliation: true,
-			reconcilerNotReady: true,
+			wantJitteredRequeue: DefaultRequeueInterval,
+			wantStatusPhase:     StatusPhaseProgressing,
+			wantReconciliation:  true,
+			reconcilerNotReady:  true,
 		},
 		{
 			name: "CreateOrUpdate returns RequeueAfter -> requeue as requested by the reconciler",
@@ -1011,7 +1009,7 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 			requeueIntervalOverride: "10m",
 		},
 		{
-			name: "Delete finished -> finalizer removed, requeue with not ready interval",
+			name: "Delete finished -> finalizer removed, requeue with jittered default requeue interval",
 			apiObj: &fakeApiImpl{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      testObjectName,
@@ -1033,9 +1031,7 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 					Name: testObjectName,
 				},
 			},
-			want: ctrl.Result{
-				RequeueAfter: notReadyRequeueInterval,
-			},
+			wantJitteredRequeue:  DefaultRequeueInterval,
 			wantReconciliation:   true,
 			clusterAccessDeleted: true,
 		},
