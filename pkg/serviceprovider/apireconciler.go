@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"time"
 
 	"github.com/openmcp-project/controller-utils/pkg/clusters"
 	controllerutil2 "github.com/openmcp-project/controller-utils/pkg/controller"
@@ -13,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/util/wait"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -25,6 +28,18 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/openmcp-project/opencontrolplane-runtime/pkg/serviceprovider/clusteraccess"
+)
+
+const (
+	// DefaultRequeueInterval is the interval after which objects are requeued if the Reconciler
+	// does not return a RequeueAfter. Resources managed on remote clusters are not watched, so this
+	// periodic reconciliation is what corrects their drift.
+	DefaultRequeueInterval = 30 * time.Minute
+	// RequeueIntervalOverrideEnvVar names the environment variable that overrides the requeue interval,
+	// including an interval set via the builder. The value is a Go duration, e.g. "10m".
+	RequeueIntervalOverrideEnvVar = "REQUEUE_INTERVAL_OVERRIDE"
+	// requeueJitterFactor adds up to 20% to the requeue interval to spread reconciliations.
+	requeueJitterFactor = 0.2
 )
 
 // APIReconciler implements a generic reconcile loop to separate platform
@@ -54,6 +69,8 @@ type APIReconciler[T API, C Config] struct {
 	providerName string
 	// emptyConfig creates an empty object of the config type
 	emptyConfig func() C
+	// requeueInterval is the interval after which objects are requeued if the Reconciler does not return a RequeueAfter.
+	requeueInterval time.Duration
 }
 
 // APIReconcilerBuilder enables building valid APIReconcilers.
@@ -64,7 +81,9 @@ type APIReconcilerBuilder[T API, C Config] struct {
 // NewAPIReconcilerBuilder creates a builder.
 func NewAPIReconcilerBuilder[T API, C Config]() *APIReconcilerBuilder[T, C] {
 	return &APIReconcilerBuilder[T, C]{
-		apiReconciler: APIReconciler[T, C]{},
+		apiReconciler: APIReconciler[T, C]{
+			requeueInterval: DefaultRequeueInterval,
+		},
 	}
 }
 
@@ -89,6 +108,15 @@ func (b *APIReconcilerBuilder[T, C]) MustBuild() *APIReconciler[T, C] {
 	if b.apiReconciler.reconciler == nil {
 		panic("reconciler is required")
 	}
+	if b.apiReconciler.requeueInterval <= 0 {
+		panic("requeue interval must be positive")
+	}
+	// the environment overrides the requeue interval set by the builder, if any. This is useful for testing and debugging.
+	requeueInterval, err := requeueIntervalFromEnv(b.apiReconciler.requeueInterval)
+	if err != nil {
+		panic(err.Error())
+	}
+	b.apiReconciler.requeueInterval = requeueInterval
 	return &b.apiReconciler
 }
 
@@ -162,6 +190,30 @@ func (b *APIReconcilerBuilder[T, C]) AdditionalDataGenerators(generators ...func
 	return b
 }
 
+// RequeueInterval overrides the DefaultRequeueInterval after which objects are requeued
+// if the Reconciler does not return a RequeueAfter.
+func (b *APIReconcilerBuilder[T, C]) RequeueInterval(interval time.Duration) *APIReconcilerBuilder[T, C] {
+	b.apiReconciler.requeueInterval = interval
+	return b
+}
+
+// requeueIntervalFromEnv returns the requeue interval set via RequeueIntervalOverrideEnvVar,
+// or the given interval if the variable is unset or empty.
+func requeueIntervalFromEnv(interval time.Duration) (time.Duration, error) {
+	value, ok := os.LookupEnv(RequeueIntervalOverrideEnvVar)
+	if !ok || value == "" {
+		return interval, nil
+	}
+	override, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s %q: %w", RequeueIntervalOverrideEnvVar, value, err)
+	}
+	if override <= 0 {
+		return 0, fmt.Errorf("invalid %s %q: must be positive", RequeueIntervalOverrideEnvVar, value)
+	}
+	return override, nil
+}
+
 // Reconcile orchestrates platform and (domain specific) Reconciler logic to reconcile API objects
 func (r *APIReconciler[T, C]) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, reconcileErr error) {
 	l := logf.FromContext(ctx)
@@ -222,9 +274,9 @@ func (r *APIReconciler[T, C]) Reconcile(ctx context.Context, req ctrl.Request) (
 	if res.RequeueAfter > 0 {
 		return res, nil
 	}
-	// fallback to poll interval to prevent 'managed service' drift
+	// fallback to the requeue interval to prevent 'managed service' drift
 	return ctrl.Result{
-		RequeueAfter: providerConfigCopy.PollInterval(),
+		RequeueAfter: wait.Jitter(r.requeueInterval, requeueJitterFactor),
 	}, nil
 }
 

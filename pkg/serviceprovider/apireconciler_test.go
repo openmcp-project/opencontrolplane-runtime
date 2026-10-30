@@ -3,6 +3,7 @@ package serviceprovider
 import (
 	"context"
 	"errors"
+	"os"
 	"slices"
 	"testing"
 	"time"
@@ -63,6 +64,7 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 		providerConfig       *fakeProviderConfigImpl
 		req                  ctrl.Request
 		want                 ctrl.Result
+		wantJitteredRequeue  time.Duration
 		wantStatusPhase      string
 		wantReason           string
 		wantReconciliation   bool
@@ -70,7 +72,7 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 		missingClusterAccess bool
 	}{
 		{
-			name: "CreateOrUpdate ok -> requeue with pc poll interval",
+			name: "CreateOrUpdate ok and ready -> requeue with jittered default requeue interval",
 			apiObj: &fakeApiImpl{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      testObjectName,
@@ -87,14 +89,11 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testObjectName,
 				},
-				FakePollInterval: time.Hour,
 			},
-			want: ctrl.Result{
-				RequeueAfter: time.Hour,
-			},
-			wantStatusPhase:    StatusPhaseReady,
-			wantReconciliation: true,
-			wantErr:            false,
+			wantJitteredRequeue: DefaultRequeueInterval,
+			wantStatusPhase:     StatusPhaseReady,
+			wantReconciliation:  true,
+			wantErr:             false,
 		},
 		{
 			name: "CreateOrUpdate error -> error and status update",
@@ -114,7 +113,6 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testObjectName,
 				},
-				FakePollInterval: time.Hour,
 			},
 			want:               ctrl.Result{},
 			wantStatusPhase:    StatusPhaseProgressing,
@@ -122,7 +120,7 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 			wantErr:            true,
 		},
 		{
-			name: "Delete ok -> requeue with pc poll interval",
+			name: "Delete ok -> requeue while waiting for cluster access deletion",
 			apiObj: &fakeApiImpl{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      testObjectName,
@@ -143,7 +141,6 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testObjectName,
 				},
-				FakePollInterval: time.Hour,
 			},
 			want: ctrl.Result{
 				RequeueAfter: time.Hour,
@@ -174,7 +171,6 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testObjectName,
 				},
-				FakePollInterval: time.Hour,
 			},
 			want:               ctrl.Result{},
 			wantStatusPhase:    StatusPhaseTerminating,
@@ -203,7 +199,6 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testObjectName,
 				},
-				FakePollInterval: time.Hour,
 			},
 			want:               ctrl.Result{},
 			wantStatusPhase:    "",
@@ -267,7 +262,6 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testObjectName,
 				},
-				FakePollInterval: time.Hour,
 			},
 			req: ctrl.Request{
 				NamespacedName: types.NamespacedName{
@@ -292,7 +286,6 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testObjectName,
 				},
-				FakePollInterval: time.Hour,
 			},
 			req: ctrl.Request{
 				NamespacedName: types.NamespacedName{
@@ -325,7 +318,6 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testObjectName,
 				},
-				FakePollInterval: time.Hour,
 			},
 			req: ctrl.Request{
 				NamespacedName: types.NamespacedName{
@@ -404,7 +396,7 @@ func TestAPIReconciler_Reconcile(t *testing.T) {
 			if tt.wantErr {
 				t.Fatal("Reconcile() succeeded unexpectedly")
 			}
-			assert.Equal(t, tt.want, got)
+			assertResult(t, tt.want, tt.wantJitteredRequeue, got)
 			assert.Equal(t, tt.wantReconciliation, mockReconciler.createOrUpdateCalled || mockReconciler.deleteCalled)
 
 			if !tt.wantReconciliation {
@@ -448,6 +440,19 @@ func assertStatusUpdate(t *testing.T, c client.Client, req ctrl.Request, wantSta
 	status, ok := obj.GetStatus().(common.Status)
 	require.True(t, ok)
 	assert.Equal(t, wantStatusPhase, status.Phase)
+}
+
+// assertResult asserts the reconcile result. A wantJitteredRequeue > 0 expects a RequeueAfter
+// between the given interval and the interval plus the maximum jitter.
+func assertResult(t *testing.T, want ctrl.Result, wantJitteredRequeue time.Duration, got ctrl.Result) {
+	t.Helper()
+	if wantJitteredRequeue == 0 {
+		assert.Equal(t, want, got)
+		return
+	}
+	maxRequeue := wantJitteredRequeue + time.Duration(requeueJitterFactor*float64(wantJitteredRequeue))
+	assert.GreaterOrEqual(t, got.RequeueAfter, wantJitteredRequeue)
+	assert.LessOrEqual(t, got.RequeueAfter, maxRequeue)
 }
 
 func assertCondition(t *testing.T, c client.Client, req ctrl.Request, wantReason string) {
@@ -497,6 +502,10 @@ type MockServiceProviderReconciler struct {
 	createOrUpdateCalled bool
 	deleteCalled         bool
 	wantError            bool
+	// notReady leaves the object progressing instead of ready on CreateOrUpdate.
+	notReady bool
+	// requeueAfter is returned by CreateOrUpdate.
+	requeueAfter time.Duration
 }
 
 // CreateOrUpdate implements [Reconciler].
@@ -509,8 +518,12 @@ func (f *MockServiceProviderReconciler) CreateOrUpdate(_ context.Context, obj *f
 		StatusProgressing(obj, reasonReconcileError, "test error requested")
 		return reconcile.Result{}, errors.New("createOrUpdate failed")
 	}
-	StatusReady(obj)
-	return reconcile.Result{}, nil
+	if f.notReady {
+		StatusProgressing(obj, "Waiting", "waiting for managed resources")
+	} else {
+		StatusReady(obj)
+	}
+	return reconcile.Result{RequeueAfter: f.requeueAfter}, nil
 }
 
 // Delete implements [Reconciler].
@@ -578,6 +591,8 @@ var _ clusteraccess.AdvancedProvider = FakeAdvancedClusterAccessProvider{}
 type FakeAdvancedClusterAccessProvider struct {
 	clusters       map[string]*clusters.Cluster
 	accessRequests map[string]*clustersv1alpha1.AccessRequest
+	// deleted makes ReconcileDelete report finished cluster access deletion.
+	deleted bool
 }
 
 // Cluster implements [AdvancedClusterAccessProvider].
@@ -608,6 +623,9 @@ func (f FakeAdvancedClusterAccessProvider) Reconcile(_ context.Context, req reco
 
 // ReconcileDelete implements [AdvancedClusterAccessProvider].
 func (f FakeAdvancedClusterAccessProvider) ReconcileDelete(_ context.Context, _ reconcile.Request, _ ...any) (reconcile.Result, error) {
+	if f.deleted {
+		return reconcile.Result{}, nil
+	}
 	// Fake waiting for cluster access deletion.
 	// This prevents finalizer removal in the delete case and the fake client from losing the not yet persisted terminating state.
 	return reconcile.Result{RequeueAfter: time.Hour}, nil
@@ -617,16 +635,28 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 	tests := []struct {
 		name string // description of this test case
 		// Named input parameters for target function.
-		apiObj             API
-		providerConfig     *fakeProviderConfigImpl
-		req                ctrl.Request
-		want               ctrl.Result
-		wantStatusPhase    string
-		wantReconciliation bool
-		wantErr            bool
+		apiObj         API
+		providerConfig *fakeProviderConfigImpl
+		req            ctrl.Request
+		want           ctrl.Result
+		// wantJitteredRequeue expects a RequeueAfter between the given interval and the interval plus jitter.
+		wantJitteredRequeue time.Duration
+		wantStatusPhase     string
+		wantReconciliation  bool
+		wantErr             bool
+		// reconcilerNotReady makes the mock reconciler leave the object not ready.
+		reconcilerNotReady bool
+		// reconcilerRequeueAfter is returned by the mock reconciler.
+		reconcilerRequeueAfter time.Duration
+		// requeueInterval overrides the default requeue interval via the builder.
+		requeueInterval time.Duration
+		// requeueIntervalOverride sets RequeueIntervalOverrideEnvVar.
+		requeueIntervalOverride string
+		// clusterAccessDeleted makes the fake cluster access provider finish the deletion of cluster access.
+		clusterAccessDeleted bool
 	}{
 		{
-			name: "CreateOrUpdate ok -> requeue with pc poll interval",
+			name: "CreateOrUpdate ok and ready -> requeue with jittered default requeue interval",
 			apiObj: &fakeApiImpl{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      testObjectName,
@@ -643,14 +673,11 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testObjectName,
 				},
-				FakePollInterval: time.Hour,
 			},
-			want: ctrl.Result{
-				RequeueAfter: time.Hour,
-			},
-			wantStatusPhase:    StatusPhaseReady,
-			wantReconciliation: true,
-			wantErr:            false,
+			wantJitteredRequeue: DefaultRequeueInterval,
+			wantStatusPhase:     StatusPhaseReady,
+			wantReconciliation:  true,
+			wantErr:             false,
 		},
 		{
 			name: "CreateOrUpdate error -> error and status update",
@@ -670,7 +697,6 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testObjectName,
 				},
-				FakePollInterval: time.Hour,
 			},
 			want:               ctrl.Result{},
 			wantStatusPhase:    StatusPhaseProgressing,
@@ -678,7 +704,7 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 			wantErr:            true,
 		},
 		{
-			name: "Delete ok -> requeue with pc poll interval",
+			name: "Delete ok -> requeue while waiting for cluster access deletion",
 			apiObj: &fakeApiImpl{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      testObjectName,
@@ -699,7 +725,6 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testObjectName,
 				},
-				FakePollInterval: time.Hour,
 			},
 			want: ctrl.Result{
 				RequeueAfter: time.Hour,
@@ -730,7 +755,6 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testObjectName,
 				},
-				FakePollInterval: time.Hour,
 			},
 			want:               ctrl.Result{},
 			wantStatusPhase:    StatusPhaseTerminating,
@@ -759,7 +783,6 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testObjectName,
 				},
-				FakePollInterval: time.Hour,
 			},
 			want:               ctrl.Result{},
 			wantStatusPhase:    "",
@@ -833,10 +856,10 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 					Name: testObjectName,
 				},
 			},
-			want:               ctrl.Result{},
-			wantStatusPhase:    StatusPhaseReady,
-			wantReconciliation: true,
-			wantErr:            false,
+			wantJitteredRequeue: DefaultRequeueInterval,
+			wantStatusPhase:     StatusPhaseReady,
+			wantReconciliation:  true,
+			wantErr:             false,
 		},
 		{
 			name: "cluster access reconciler fails -> error and status update",
@@ -850,7 +873,6 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testObjectName,
 				},
-				FakePollInterval: time.Hour,
 			},
 			req: ctrl.Request{
 				NamespacedName: types.NamespacedName{
@@ -863,13 +885,168 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 			wantReconciliation: true,
 			wantErr:            true,
 		},
+		{
+			name: "CreateOrUpdate ok but not ready -> requeue with jittered default requeue interval",
+			apiObj: &fakeApiImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+				},
+			},
+			req: ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+				},
+			},
+			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
+			},
+			wantJitteredRequeue: DefaultRequeueInterval,
+			wantStatusPhase:     StatusPhaseProgressing,
+			wantReconciliation:  true,
+			reconcilerNotReady:  true,
+		},
+		{
+			name: "CreateOrUpdate returns RequeueAfter -> requeue as requested by the reconciler",
+			apiObj: &fakeApiImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+				},
+			},
+			req: ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+				},
+			},
+			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
+			},
+			want: ctrl.Result{
+				RequeueAfter: 5 * time.Minute,
+			},
+			wantStatusPhase:        StatusPhaseReady,
+			wantReconciliation:     true,
+			reconcilerRequeueAfter: 5 * time.Minute,
+		},
+		{
+			name: "CreateOrUpdate ok and ready with custom requeue interval -> requeue with jittered custom interval",
+			apiObj: &fakeApiImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+				},
+			},
+			req: ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+				},
+			},
+			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
+			},
+			wantJitteredRequeue: 2 * time.Hour,
+			wantStatusPhase:     StatusPhaseReady,
+			wantReconciliation:  true,
+			requeueInterval:     2 * time.Hour,
+		},
+		{
+			name: "CreateOrUpdate ok and ready with requeue interval override -> requeue with jittered override",
+			apiObj: &fakeApiImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+				},
+			},
+			req: ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+				},
+			},
+			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
+			},
+			wantJitteredRequeue:     10 * time.Minute,
+			wantStatusPhase:         StatusPhaseReady,
+			wantReconciliation:      true,
+			requeueIntervalOverride: "10m",
+		},
+		{
+			name: "CreateOrUpdate ok and ready with custom requeue interval and override -> override wins",
+			apiObj: &fakeApiImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+				},
+			},
+			req: ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+				},
+			},
+			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
+			},
+			wantJitteredRequeue:     10 * time.Minute,
+			wantStatusPhase:         StatusPhaseReady,
+			wantReconciliation:      true,
+			requeueInterval:         2 * time.Hour,
+			requeueIntervalOverride: "10m",
+		},
+		{
+			name: "Delete finished -> finalizer removed, requeue with jittered default requeue interval",
+			apiObj: &fakeApiImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+					DeletionTimestamp: &metav1.Time{
+						Time: time.Now(),
+					},
+					Finalizers: []string{(&fakeApiImpl{}).Finalizer()},
+				},
+			},
+			req: ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      testObjectName,
+					Namespace: testNamespaceName,
+				},
+			},
+			providerConfig: &fakeProviderConfigImpl{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testObjectName,
+				},
+			},
+			wantJitteredRequeue:  DefaultRequeueInterval,
+			wantReconciliation:   true,
+			clusterAccessDeleted: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.requeueIntervalOverride != "" {
+				t.Setenv(RequeueIntervalOverrideEnvVar, tt.requeueIntervalOverride)
+			}
 			onboardingCluster := createFakeCluster(t, "onboarding", tt.apiObj)
 			platformCluster := createFakeCluster(t, "platform")
 			mockReconciler := &MockServiceProviderReconciler{
-				wantError: tt.wantErr,
+				wantError:    tt.wantErr,
+				notReady:     tt.reconcilerNotReady,
+				requeueAfter: tt.reconcilerRequeueAfter,
 			}
 			builder := NewAPIReconcilerBuilder[*fakeApiImpl, *fakeProviderConfigImpl]().
 				EmptyObjectProvider(func() *fakeApiImpl { return &fakeApiImpl{} }).
@@ -877,6 +1054,7 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 				OnboardingCluster(onboardingCluster).
 				PlatformCluster(platformCluster).
 				AdvancedClusterAccessReconciler(FakeAdvancedClusterAccessProvider{
+					deleted: tt.clusterAccessDeleted,
 					clusters: map[string]*clusters.Cluster{
 						clusteraccess.MCPClusterID:      createFakeCluster(t, testMCPName),
 						clusteraccess.WorkloadClusterID: createFakeCluster(t, testWorkloadName),
@@ -908,6 +1086,9 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 				}).
 				Reconciler(mockReconciler).
 				WorkloadCluster(true)
+			if tt.requeueInterval > 0 {
+				builder = builder.RequeueInterval(tt.requeueInterval)
+			}
 			r := builder.MustBuild()
 			if tt.providerConfig != nil {
 				r.providerName = tt.providerConfig.Name
@@ -924,7 +1105,7 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 			if tt.wantErr {
 				t.Fatal("Reconcile() succeeded unexpectedly")
 			}
-			assert.Equal(t, tt.want, got)
+			assertResult(t, tt.want, tt.wantJitteredRequeue, got)
 			assert.Equal(t, tt.wantReconciliation, mockReconciler.createOrUpdateCalled || mockReconciler.deleteCalled)
 
 			if !tt.wantReconciliation {
@@ -934,6 +1115,13 @@ func TestAPIReconciler_Reconcile_Advanced(t *testing.T) {
 				assert.Nil(t, mockReconciler.config)
 				assert.Empty(t, mockReconciler.clusterContext.MCPAccessSecretKey)
 				assert.Empty(t, mockReconciler.clusterContext.WorkloadAccessSecretKey)
+				return
+			}
+
+			if tt.clusterAccessDeleted {
+				// the finalizer has been removed, so the object is gone
+				err := onboardingCluster.Client().Get(context.Background(), tt.req.NamespacedName, &fakeApiImpl{})
+				assert.True(t, apierrors.IsNotFound(err), "expected object to be deleted, got: %v", err)
 				return
 			}
 
@@ -1073,6 +1261,66 @@ func createFakeClusterWithUnstructuredList(t *testing.T, id string, objs []clien
 	return clusters.NewTestClusterFromClient(id, fakeClient)
 }
 
+func TestRequeueIntervalFromEnv(t *testing.T) {
+	tests := []struct {
+		name string
+		// set makes the test set RequeueIntervalOverrideEnvVar to value.
+		set     bool
+		value   string
+		want    time.Duration
+		wantErr bool
+	}{
+		{name: "unset -> given interval", want: DefaultRequeueInterval},
+		{name: "empty -> given interval", set: true, value: "", want: DefaultRequeueInterval},
+		{name: "valid duration -> override", set: true, value: "10m", want: 10 * time.Minute},
+		{name: "missing unit -> error", set: true, value: "30", wantErr: true},
+		{name: "not a duration -> error", set: true, value: "abc", wantErr: true},
+		{name: "zero -> error", set: true, value: "0s", wantErr: true},
+		{name: "negative -> error", set: true, value: "-1m", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// t.Setenv restores the original value after the test, also when unsetting it below
+			t.Setenv(RequeueIntervalOverrideEnvVar, tt.value)
+			if !tt.set {
+				require.NoError(t, os.Unsetenv(RequeueIntervalOverrideEnvVar))
+			}
+			got, err := requeueIntervalFromEnv(DefaultRequeueInterval)
+			if tt.wantErr {
+				assert.ErrorContains(t, err, RequeueIntervalOverrideEnvVar)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestAPIReconcilerBuilder_MustBuild_InvalidRequeueIntervalOverride(t *testing.T) {
+	t.Setenv(RequeueIntervalOverrideEnvVar, "abc")
+	builder := NewAPIReconcilerBuilder[*fakeApiImpl, *fakeProviderConfigImpl]().
+		EmptyObjectProvider(func() *fakeApiImpl { return &fakeApiImpl{} }).
+		EmptyConfigProvider(func() *fakeProviderConfigImpl { return &fakeProviderConfigImpl{} }).
+		OnboardingCluster(createFakeCluster(t, "onboarding")).
+		PlatformCluster(createFakeCluster(t, "platform")).
+		AdvancedClusterAccessReconciler(FakeAdvancedClusterAccessProvider{}).
+		Reconciler(&MockServiceProviderReconciler{})
+	assert.Panics(t, func() { builder.MustBuild() })
+}
+
+func TestAPIReconcilerBuilder_MustBuild_InvalidRequeueIntervalWithValidOverride(t *testing.T) {
+	t.Setenv(RequeueIntervalOverrideEnvVar, "1m")
+	builder := NewAPIReconcilerBuilder[*fakeApiImpl, *fakeProviderConfigImpl]().
+		EmptyObjectProvider(func() *fakeApiImpl { return &fakeApiImpl{} }).
+		EmptyConfigProvider(func() *fakeProviderConfigImpl { return &fakeProviderConfigImpl{} }).
+		OnboardingCluster(createFakeCluster(t, "onboarding")).
+		PlatformCluster(createFakeCluster(t, "platform")).
+		AdvancedClusterAccessReconciler(FakeAdvancedClusterAccessProvider{}).
+		Reconciler(&MockServiceProviderReconciler{}).
+		RequeueInterval(-time.Minute)
+	assert.Panics(t, func() { builder.MustBuild() })
+}
+
 func TestMapSecretToRequests(t *testing.T) {
 	const secretName = "my-secret"
 	tests := []struct {
@@ -1093,7 +1341,7 @@ func TestMapSecretToRequests(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testObjectName,
 				},
-				FakePollInterval: time.Hour},
+			},
 			existingObjs: []client.Object{
 				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-1", Namespace: testNamespaceName}}, //nolint:goconst
 				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-2", Namespace: testNamespaceName}},
@@ -1110,7 +1358,7 @@ func TestMapSecretToRequests(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testObjectName,
 				},
-				FakePollInterval: time.Hour},
+			},
 			existingObjs: []client.Object{
 				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-1", Namespace: testNamespaceName}},
 			},
@@ -1126,7 +1374,7 @@ func TestMapSecretToRequests(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testObjectName,
 				},
-				FakePollInterval: time.Hour},
+			},
 			existingObjs: nil,
 			wantRequests: 0,
 		},
@@ -1245,7 +1493,7 @@ func TestMapConfigMapToRequests(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testObjectName,
 				},
-				FakePollInterval: time.Hour},
+			},
 			existingObjs: []client.Object{
 				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-1", Namespace: testNamespaceName}},
 				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-2", Namespace: testNamespaceName}},
@@ -1262,7 +1510,7 @@ func TestMapConfigMapToRequests(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testObjectName,
 				},
-				FakePollInterval: time.Hour},
+			},
 			existingObjs: []client.Object{
 				&fakeApiImpl{ObjectMeta: metav1.ObjectMeta{Name: "obj-1", Namespace: testNamespaceName}},
 			},
@@ -1278,7 +1526,7 @@ func TestMapConfigMapToRequests(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testObjectName,
 				},
-				FakePollInterval: time.Hour},
+			},
 			existingObjs: nil,
 			wantRequests: 0,
 		},
@@ -1337,18 +1585,12 @@ var _ Config = &fakeProviderConfigImpl{}
 type fakeProviderConfigImpl struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	FakePollInterval  time.Duration
 }
 
 func (f *fakeProviderConfigImpl) DeepCopyObject() runtime.Object {
 	return &fakeProviderConfigImpl{
-		ObjectMeta:       *f.DeepCopy(),
-		FakePollInterval: f.PollInterval(),
+		ObjectMeta: *f.DeepCopy(),
 	}
-}
-
-func (f *fakeProviderConfigImpl) PollInterval() time.Duration {
-	return f.FakePollInterval
 }
 
 // tests the provider config watch
@@ -1378,8 +1620,8 @@ var _ = Describe("API Reconciler", func() {
 
 		It("The Foo resource should get ready", func() {
 			By("Reconciling the created resource")
-			// verify poll interval default is applied on initial create
-			Eventually(reconciler.createOrUpdateConfig).Should(Receive(HaveField("Spec.PollInterval.Duration", time.Minute)))
+			// verify the provider config default is applied on initial create
+			Eventually(reconciler.createOrUpdateConfig).Should(Receive(HaveField("Spec.Foo", "bar")))
 			Eventually(func() apiv1alpha1.FooStatus {
 				foo := &apiv1alpha1.Foo{}
 				foo.SetName(fooKey.Name)
@@ -1394,10 +1636,10 @@ var _ = Describe("API Reconciler", func() {
 			config := &configv1alpha1.ProviderConfig{}
 			config.SetName(configKey.Name)
 			Expect(platformClient.Get(ctx, configKey, config)).To(Succeed())
-			config.Spec.PollInterval = &metav1.Duration{Duration: time.Hour}
+			config.Spec.Foo = "baz"
 			Expect(platformClient.Update(ctx, config)).To(Succeed())
-			// verify poll interval matches the updated provider config
-			Eventually(reconciler.createOrUpdateConfig).Should(Receive(HaveField("Spec.PollInterval.Duration", time.Hour)))
+			// verify the reconciler receives the updated provider config
+			Eventually(reconciler.createOrUpdateConfig).Should(Receive(HaveField("Spec.Foo", "baz")))
 		})
 	})
 })
