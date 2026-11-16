@@ -13,6 +13,17 @@ This project uses [task](https://taskfile.dev/) for code generation, validation,
 
 The test task configures [envtest](https://sigs.k8s.io/controller-runtime/tools/setup-envtest) automatically.
 
+## Metrics
+
+The following metrics are exported by `opencontrolplane-runtime`:
+
+| Name                                             | Type      | Description                                                                        |
+| ------------------------------------------------ | --------- | ---------------------------------------------------------------------------------- |
+| opencontrolplane_runtime_resource_create_seconds | Histogram | Time to create a resource to ready in seconds (based on object creation timestamp) |
+| opencontrolplane_runtime_resource_update_seconds | Histogram | Time to update a resource to ready in seconds (based on object generation changes) |
+
+Note that both metrics reflect transition times from an end-user perspective. That means both measurements include create/update delays caused by misconfiguration, invalid user requests, provider downtimes or slow status refresh.
+
 ## Support, Feedback, Contributing
 
 This project is open to feature requests/suggestions, bug reports etc. via [GitHub issues](https://github.com/openmcp-project/opencontrolplane-runtime/issues). Contribution and feedback are encouraged and always welcome. For more information about how to contribute, the project structure, as well as additional contribution information, see our [Contribution Guidelines](https://github.com/openmcp-project/.github/blob/main/CONTRIBUTING.md).
