@@ -7,8 +7,8 @@ require (
 	github.com/onsi/ginkgo/v2 v2.34.0
 	github.com/onsi/gomega v1.44.0
 	github.com/openmcp-project/controller-utils v0.34.0
-	github.com/openmcp-project/openmcp-operator/api v1.4.4
-	github.com/openmcp-project/openmcp-operator/lib v1.4.4
+	github.com/openmcp-project/openmcp-operator/api v1.4.5
+	github.com/openmcp-project/openmcp-operator/lib v1.4.5
 	github.com/stretchr/testify v1.12.1
 	go.uber.org/zap v1.28.0
 	k8s.io/api v0.37.2
